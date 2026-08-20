@@ -59,3 +59,16 @@ def guest_page() -> str:
 @pytest.fixture
 def member_page() -> str:
     return make_page(authenticated=True)
+
+
+def make_login_form() -> str:
+    """The classic Salesforce login form, trimmed to what login() reads."""
+    return (
+        '<html><body><form name="login" method="post" action="/login">'
+        '<input type="hidden" name="lt" value="standard"/>'
+        '<input type="hidden" name="display" value="page"/>'
+        '<input type="email" name="username" value=""/>'
+        '<input type="password" name="pw" value=""/>'
+        '<input type="submit" name="Login" value="Log In"/>'
+        "</form></body></html>"
+    )

@@ -32,7 +32,21 @@ cp config.example.json ~/.config/mcp-walmart-support/config.json
 $EDITOR ~/.config/mcp-walmart-support/config.json
 
 uv run walmart-case auth check
+uv run walmart-case cases list --status "need info"
+uv run walmart-case cases get 10000001
 ```
+
+## Sessions
+
+Each invocation is its own process, so session cookies are cached in
+`$XDG_CACHE_HOME/mcp-walmart-support/session.json` (mode `0600`) and reused
+until the portal rejects them. Without that, every command would pay a full
+login — four requests and a Salesforce login event before doing any work; with
+it, a warm command is roughly twice as fast and logs in only when it must.
+
+A session that dies mid-command is retried once from a clean login, because
+Salesforce reports an invalid session in the middle of a request rather than up
+front. `walmart-case auth logout` discards the cached session.
 
 ## Configuration
 

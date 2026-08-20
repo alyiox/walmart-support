@@ -195,7 +195,7 @@ def test_additional_fields_only_carry_declared_ones() -> None:
     by_title = {item["title"]: item["value"] for item in extra}
     assert by_title["Advertisers Affected"] == "1, 2"
     assert by_title["Description"] == "d"
-    # not declared by this category, so not sent
+    # never sent: it collided with "Advertisers Affected" on the portal's side
     assert "Advertiser Account Name" not in by_title
 
 

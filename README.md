@@ -103,12 +103,16 @@ of which the method signature revealed:
 * Category routing comes from the resolved level-1/level-2 pair, and a filed
   case reports `API-AdCases` / `Endpoint-specific problem` back.
 
-> **Known defect:** the portal does not associate additional fields by the
-> `title` we send — it relabels `Name`/`Email` to `Contact Name`/`Contact
-> Email` and mis-assigns the rest, so `Advertisers Affected` can come out
-> holding the account name. The wrapper evidently carries an identifier field
-> beyond `title`/`value`. Until that is pinned down, put anything that matters
-> in the description body, which is stored verbatim.
+> **Known defect:** the portal resolves additional fields loosely against the
+> `title` we send. On the first CLI-filed case, `Advertiser Account Name` and
+> `Advertisers Affected` collided on their shared prefix and the account name
+> was stored under the advertisers field, dropping the ids. The colliding field
+> is no longer sent, which should fix it, but that is **unconfirmed until the
+> next filing** — and the wrapper evidently carries an identifier beyond
+> `title`/`value` (its deserializer also accepts `fieldName`).
+>
+> Either way, put anything that matters in the description body: it is stored
+> verbatim, whereas these fields are not reliably addressable.
 
 ### Closing and replying
 

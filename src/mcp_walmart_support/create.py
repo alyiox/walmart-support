@@ -205,11 +205,14 @@ def build_payload(
     Every parameter the method declares is sent, empty where it does not apply,
     because Apex binds by name and a missing one is not the same as a blank one.
     """
+    # "Advertiser Account Name" is deliberately absent: it collides with
+    # "Advertisers Affected" on the portal's side, which stored the account name
+    # under the advertisers field and dropped the ids. The account already
+    # reaches the case through selectedAccountId and guestAccountName.
     values = {
         "Name": identity.contact_name,
         "Email": identity.contact_email,
         "Advertisers Affected": draft.advertisers,
-        "Advertiser Account Name": identity.account_name,
         "Description": draft.description,
     }
     # Only send fields this category actually declares. The shape is a JSON

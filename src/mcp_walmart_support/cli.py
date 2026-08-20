@@ -33,6 +33,7 @@ from .cases import (
     ACTIVITY_PAGE,
     Case,
     TooManyCandidates,
+    close_case,
     deep_filter,
     fetch_case_detail,
     fetch_cases,
@@ -225,6 +226,19 @@ def _cmd_cases_reply(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_cases_close(cfg: Config, args: argparse.Namespace) -> int:
+    def run(session: AuraSession) -> tuple[str, str]:
+        detail = fetch_case_detail(session, args.case_number)
+        return detail.status, close_case(session, detail.case_id)
+
+    before, after = with_session(cfg, ACTIVITY_PAGE, run)
+    if args.json:
+        print(json.dumps({"case": args.case_number, "was": before, "now": after}, indent=2))
+    else:
+        print(f"case {args.case_number}: {before} -> {after or '(status not reported)'}")
+    return 0
+
+
 def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     """Show the support categories the portal's own dropdown offers."""
     ad_unit = resolve_platform(args.platform)
@@ -373,6 +387,9 @@ def _build_parser() -> argparse.ArgumentParser:
     attach.add_argument("case_number")
     attach.add_argument("files", nargs="+", help="one or more files to upload")
 
+    close = cases.add_parser("close", help="close a case")
+    close.add_argument("case_number")
+
     reply = cases.add_parser("reply", help="post a reply on an existing case")
     reply.add_argument("case_number")
     message = reply.add_mutually_exclusive_group(required=True)
@@ -445,6 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("cases", "replies"): _cmd_cases_replies,
         ("cases", "attach"): _cmd_cases_attach,
         ("cases", "reply"): _cmd_cases_reply,
+        ("cases", "close"): _cmd_cases_close,
         ("cases", "create"): _cmd_cases_create,
         ("categories", "list"): _cmd_categories_list,
     }

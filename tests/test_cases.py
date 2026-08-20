@@ -12,6 +12,7 @@ from mcp_walmart_support.aura import AuraError, AuraSession
 from mcp_walmart_support.cases import (
     Case,
     TooManyCandidates,
+    close_case,
     deep_filter,
     fetch_case_detail,
     fetch_cases,
@@ -312,3 +313,30 @@ def test_post_comment_sends_the_portal_shape() -> None:
     # the portal's comment box submits attachment removals with the text
     assert seen[0]["params"] == {"comment": "answer", "caseID": "500KW1", "filesToDelete": ""}
     assert comments[0].body == "answer" and comments[0].from_advertiser
+
+
+def test_close_case_returns_the_new_status() -> None:
+    page = make_page(authenticated=True)
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "aura" not in request.url.path:
+            return httpx.Response(200, text=page)
+        body = json.loads(urllib.parse.parse_qs(request.content.decode())["message"][0])
+        seen.append(body["actions"][0])
+        return httpx.Response(
+            200,
+            text=json.dumps(
+                {
+                    "actions": [
+                        {"id": "1;a", "state": "SUCCESS", "returnValue": {"Status": "Closed"}}
+                    ]
+                }
+            ),
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
+    session = AuraSession.bootstrap(client, "/s/activity")
+    assert close_case(session, "500KW1") == "Closed"
+    assert seen[0]["descriptor"] == "apex://AC_CaseDetailController/ACTION$closeCaseSt"
+    assert seen[0]["params"] == {"caseID": "500KW1"}

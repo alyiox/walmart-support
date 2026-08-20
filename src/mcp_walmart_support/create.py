@@ -205,20 +205,31 @@ def build_payload(
     Every parameter the method declares is sent, empty where it does not apply,
     because Apex binds by name and a missing one is not the same as a blank one.
     """
-    additional = {
+    values = {
         "Name": identity.contact_name,
         "Email": identity.contact_email,
         "Advertisers Affected": draft.advertisers,
         "Advertiser Account Name": identity.account_name,
         "Description": draft.description,
     }
-    # Only send fields this category actually declares.
+    # Only send fields this category actually declares. The shape is a JSON
+    # list of AdditionalFieldWrapper objects keyed title/value, mirroring the
+    # Support_Form__c records' own Title__c: Apex deserializes the string into a
+    # List (an object gives "Expected '[' at the beginning of List/Set") and
+    # rejects any other key by name.
     declared = set(selection.level2.form_fields)
-    additional = {k: v for k, v in additional.items() if k in declared and v}
+    additional = [
+        {"title": label, "value": value}
+        for label, value in values.items()
+        if label in declared and value
+    ]
 
     return {
-        "partnershipType": identity.user_type,
-        "partnershipId": identity.account_id,
+        # Partnership__c is a lookup to a Partnership record and applies to
+        # supplier/seller channels (see getPartnershipLabels), not to API
+        # partners; an account id here fails with FIELD_INTEGRITY_EXCEPTION.
+        "partnershipType": "",
+        "partnershipId": "",
         "selectedAccountId": identity.account_id,
         "guestAccountName": identity.account_name,
         "guestName": identity.contact_name,

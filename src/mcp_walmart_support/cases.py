@@ -205,9 +205,30 @@ def fetch_case_detail(session: AuraSession, case_number: str) -> CaseDetail:
     return CaseDetail.from_payload(raw)
 
 
-def fetch_cases(session: AuraSession) -> list[Case]:
-    """Return every case visible to the logged-in community user, newest first."""
-    raw = session.apex(_COMPONENT, _LIST_METHOD, {"casesTofetch": ""})
+DEEP_SEARCH_CAP = 25
+
+
+def pushdown_limit(limit: int, *, filtered: bool) -> int | None:
+    """Decide whether ``limit`` can be handed to the server.
+
+    The portal applies it as a SOQL ``LIMIT``, i.e. *before* any filtering, so
+    pushing it down alongside a filter would narrow within an arbitrary slice
+    rather than returning the newest matches.
+    """
+    if limit > 0 and not filtered:
+        return limit
+    return None
+
+
+def fetch_cases(session: AuraSession, limit: int | None = None) -> list[Case]:
+    """Return cases visible to the logged-in community user, newest first.
+
+    ``limit`` becomes the portal's ``casesTofetch``. That value is interpolated
+    straight into its SOQL, so it is coerced to an int and never passed through
+    as caller-supplied text.
+    """
+    requested = "" if limit is None else str(int(limit))
+    raw = session.apex(_COMPONENT, _LIST_METHOD, {"casesTofetch": requested})
     records = raw if isinstance(raw, list) else []
     cases = [Case.from_record(r) for r in records if isinstance(r, dict)]
     return sorted(cases, key=lambda c: c.created_date, reverse=True)
@@ -241,6 +262,41 @@ def filter_cases(
             if needle in c.subject.casefold() or needle in c.description.casefold()
         ]
     return result
+
+
+class TooManyCandidates(RuntimeError):
+    """A deep search would need more detail requests than the cap allows."""
+
+
+def deep_filter(
+    session: AuraSession,
+    cases: list[Case],
+    query: str,
+    *,
+    cap: int = DEEP_SEARCH_CAP,
+) -> list[Case]:
+    """Match ``query`` against each case's full text, one request per case.
+
+    The list action abbreviates subject and description, so a plain filter can
+    miss a match that is present in the real body. This reads each candidate's
+    detail instead — including the conversation, so support's own replies are
+    searchable too. Costs one request per candidate, hence the cap.
+    """
+    if len(cases) > cap:
+        raise TooManyCandidates(
+            f"{len(cases)} candidates exceeds the deep-search cap of {cap}; "
+            "narrow with --status/--since or raise --limit"
+        )
+    needle = query.casefold()
+    matched: list[Case] = []
+    for case in cases:
+        detail = fetch_case_detail(session, case.case_number)
+        haystack = "\n".join(
+            [detail.subject, detail.description, *(c.body for c in detail.comments)]
+        )
+        if needle in haystack.casefold():
+            matched.append(case)
+    return matched
 
 
 def find_case(cases: list[Case], case_number: str) -> Case | None:

@@ -1,0 +1,7 @@
+{
+  "base_url": "https://advertisinghelp.walmart.com",
+  "username": "you@example.com",
+  "password": "your-portal-password",
+  "cookie": "",
+  "timeout": 60
+}

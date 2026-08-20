@@ -218,7 +218,7 @@ def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_case_create(cfg: Config, args: argparse.Namespace) -> int:
+def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
     description = Path(args.description_file).read_text()
     draft = CaseDraft(
         subject=args.subject,
@@ -272,12 +272,12 @@ _EXAMPLES = """examples:
   walmart-case cases replies 10000001 --from-walmart --latest 1
   walmart-case cases list --query "adGroups/list" --since 30d --deep
   walmart-case categories list --platform sponsored-search
-  walmart-case case create --subject ... --description-file body.txt
+  walmart-case cases create --subject ... --description-file body.txt
                                               prints the payload; add --submit to file
 
 notes:
   every command takes --json for machine-readable output
-  case create files nothing unless --submit is given
+  cases create files nothing unless --submit is given
 """
 
 
@@ -298,7 +298,7 @@ def _build_parser() -> argparse.ArgumentParser:
     auth.add_parser("check", help="report whether the portal session is authenticated")
     auth.add_parser("logout", help="discard the cached session")
 
-    cases = sub.add_parser("cases", help="read support cases").add_subparsers(
+    cases = sub.add_parser("cases", help="read and file support cases").add_subparsers(
         dest="cases_command", required=True
     )
     listing = cases.add_parser("list", help="list cases, newest first")
@@ -334,10 +334,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--platform", default="display", choices=sorted(PLATFORMS), help="default: display"
     )
 
-    case = sub.add_parser("case", help="file a support case").add_subparsers(
-        dest="case_command", required=True
-    )
-    create = case.add_parser(
+    create = cases.add_parser(
         "create",
         help="file a case (prints the payload unless --submit is given)",
     )
@@ -384,7 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("cases", "list"): _cmd_cases_list,
         ("cases", "get"): _cmd_cases_get,
         ("cases", "replies"): _cmd_cases_replies,
-        ("case", "create"): _cmd_case_create,
+        ("cases", "create"): _cmd_cases_create,
         ("categories", "list"): _cmd_categories_list,
     }
     key = (str(args.command), str(getattr(args, f"{args.command}_command", "")))

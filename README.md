@@ -38,17 +38,17 @@ uv run walmart-case cases replies 10000001 --from-walmart
 
 # discover what to file under, then file
 uv run walmart-case categories list --platform sponsored-search
-uv run walmart-case case create \
+uv run walmart-case cases create \
   --platform display \
   --category "API Support" --issue "Endpoint-specific problem" \
   --subject "Display API: ..." --advertisers "111111, 222222" \
   --description-file ./body.txt          # prints the payload
-uv run walmart-case case create ... --submit   # actually files it
+uv run walmart-case cases create ... --submit   # actually files it
 ```
 
 ## Filing a case
 
-`case create` prints the exact `openCase` payload and files nothing unless
+`cases create` prints the exact `openCase` payload and files nothing unless
 `--submit` is given. That default is deliberate: a case goes to Walmart's
 support queue, and a mis-mapped category files a real but misrouted one.
 

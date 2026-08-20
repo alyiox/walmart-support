@@ -34,7 +34,38 @@ $EDITOR ~/.config/mcp-walmart-support/config.json
 uv run walmart-case auth check
 uv run walmart-case cases list --status "need info"
 uv run walmart-case cases get 10000001
+
+# discover what to file under, then file
+uv run walmart-case categories list --platform sponsored-search
+uv run walmart-case case create \
+  --platform display \
+  --category "API Support" --issue "Endpoint-specific problem" \
+  --subject "Display API: ..." --advertisers "111111, 222222" \
+  --description-file ./body.txt          # prints the payload
+uv run walmart-case case create ... --submit   # actually files it
 ```
+
+## Filing a case
+
+`case create` prints the exact `openCase` payload and files nothing unless
+`--submit` is given. That default is deliberate: a case goes to Walmart's
+support queue, and a mis-mapped category files a real but misrouted one.
+
+Categories are resolved by name against the portal's own dropdown data rather
+than hardcoded, so `categories list` shows exactly what the UI offers and both
+the UI label ("API Support") and the wizard's internal name ("API") match.
+
+`--platform` covers Display and Sponsored Search; the portal collapses Search
+onto its "Sponsored Products" ad unit, which is why a Search case shows
+Sponsored Products as its platform. Sponsored Brands and Videos are accepted
+but the portal publishes no categories for them on a partner account, and the
+error says so.
+
+> **Unverified:** the identity and category parameters are confirmed — the
+> resolved `API-AdCases` backend value matches what a filed case reports — but
+> the remaining `openCase` parameters are inferred from the published method
+> signature, not from an observed submit. Review a `--dry-run` payload against a
+> real submit before trusting `--submit`.
 
 ## Sessions
 

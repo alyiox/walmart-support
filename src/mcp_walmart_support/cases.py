@@ -67,6 +67,7 @@ class Case:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "case_id": self.case_id,
             "case_number": self.case_number,
             "created_date": self.created_date,
             "status": self.status,
@@ -131,6 +132,7 @@ class Comment:
 class CaseDetail:
     """One case with its untruncated text and conversation."""
 
+    case_id: str
     case_number: str
     subject: str
     description: str
@@ -159,6 +161,7 @@ class CaseDetail:
             Comment.from_record(c) for c in payload.get("comments") or [] if isinstance(c, dict)
         ]
         return cls(
+            case_id=str(detail.get("Id") or ""),
             case_number=str(detail.get("CaseNumber") or ""),
             subject=str(detail.get("Subject") or ""),
             description=str(detail.get("Description") or ""),
@@ -177,6 +180,7 @@ class CaseDetail:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "case_id": self.case_id,
             "case_number": self.case_number,
             "created_date": self.created_date,
             "status": self.status,
@@ -218,6 +222,22 @@ def pushdown_limit(limit: int, *, filtered: bool) -> int | None:
     if limit > 0 and not filtered:
         return limit
     return None
+
+
+def post_comment(session: AuraSession, case_id: str, message: str) -> list[Comment]:
+    """Post a reply on a case and return its conversation as the portal sees it.
+
+    The portal's own comment box submits attachment removals alongside the text,
+    hence ``filesToDelete``; sending it empty posts the comment alone.
+    """
+    raw = session.apex(
+        _DETAIL_COMPONENT,
+        "saveCaseComment",
+        {"comment": message, "caseID": case_id, "filesToDelete": ""},
+    )
+    records = raw if isinstance(raw, list) else []
+    comments = [Comment.from_record(r) for r in records if isinstance(r, dict)]
+    return sorted(comments, key=lambda c: c.created_date)
 
 
 def fetch_cases(session: AuraSession, limit: int | None = None) -> list[Case]:

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import httpx
 
+from .attachments import Upload, upload_file
 from .aura import AuraError, AuraSession
 from .auth import (
     SESSION_PATH,
@@ -36,6 +37,7 @@ from .cases import (
     fetch_case_detail,
     fetch_cases,
     filter_cases,
+    post_comment,
     pushdown_limit,
 )
 from .config import CONFIG_PATH, Config, load_config
@@ -179,6 +181,50 @@ def _cmd_cases_replies(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_cases_attach(cfg: Config, args: argparse.Namespace) -> int:
+    paths = [Path(p) for p in args.files]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        print(f"no such file: {', '.join(missing)}", file=sys.stderr)
+        return 2
+
+    def run(session: AuraSession) -> tuple[int, list[Upload]]:
+        detail = fetch_case_detail(session, args.case_number)
+        uploads = [upload_file(session, detail.case_id, path) for path in paths]
+        after = fetch_case_detail(session, args.case_number).attachments
+        return after, uploads
+
+    after, uploads = with_session(cfg, ACTIVITY_PAGE, run)
+    if args.json:
+        payload = {"attachments": after, "uploaded": [vars(u) for u in uploads]}
+        print(json.dumps(payload, indent=2))
+        return 0
+    for upload in uploads:
+        print(f"{upload.file_name}  {upload.byte_size} bytes  {upload.content_type}")
+        print(f"   {upload.content_version_id}")
+    print(f"\ncase {args.case_number} now reports {after} attachment(s)")
+    return 0
+
+
+def _cmd_cases_reply(cfg: Config, args: argparse.Namespace) -> int:
+    message = Path(args.message_file).read_text() if args.message_file else args.message
+    if not message.strip():
+        print("refusing to post an empty reply", file=sys.stderr)
+        return 2
+
+    def run(session: AuraSession) -> tuple[str, int]:
+        detail = fetch_case_detail(session, args.case_number)
+        comments = post_comment(session, detail.case_id, message)
+        return detail.status, len(comments)
+
+    status, count = with_session(cfg, ACTIVITY_PAGE, run)
+    if args.json:
+        print(json.dumps({"case": args.case_number, "status": status, "comments": count}, indent=2))
+    else:
+        print(f"posted to case {args.case_number} ({status}); {count} message(s) on the thread")
+    return 0
+
+
 def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     """Show the support categories the portal's own dropdown offers."""
     ad_unit = resolve_platform(args.platform)
@@ -271,6 +317,8 @@ _EXAMPLES = """examples:
   walmart-case cases get 10000001             one case, full text
   walmart-case cases replies 10000001 --from-walmart --latest 1
   walmart-case cases list --query "adGroups/list" --since 30d --deep
+  walmart-case cases reply 10000001 --message-file answer.txt
+  walmart-case cases attach 10000001 ./har.json
   walmart-case cases create --subject ... --description-file body.txt
                                               prints the payload; add --submit to file
   walmart-case categories list --platform sponsored-search
@@ -320,6 +368,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     detail = cases.add_parser("get", help="show one case in full")
     detail.add_argument("case_number")
+
+    attach = cases.add_parser("attach", help="upload files to an existing case")
+    attach.add_argument("case_number")
+    attach.add_argument("files", nargs="+", help="one or more files to upload")
+
+    reply = cases.add_parser("reply", help="post a reply on an existing case")
+    reply.add_argument("case_number")
+    message = reply.add_mutually_exclusive_group(required=True)
+    message.add_argument("--message", help="reply text")
+    message.add_argument("--message-file", help="file holding the reply text")
 
     replies = cases.add_parser("replies", help="show a case's conversation")
     replies.add_argument("case_number")
@@ -385,6 +443,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("cases", "list"): _cmd_cases_list,
         ("cases", "get"): _cmd_cases_get,
         ("cases", "replies"): _cmd_cases_replies,
+        ("cases", "attach"): _cmd_cases_attach,
+        ("cases", "reply"): _cmd_cases_reply,
         ("cases", "create"): _cmd_cases_create,
         ("categories", "list"): _cmd_categories_list,
     }

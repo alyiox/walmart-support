@@ -47,6 +47,34 @@ uv run walmart-case cases create ... --submit   # actually files it
 uv run walmart-case categories list --platform sponsored-search
 ```
 
+## Replying and attaching
+
+`cases reply` posts a comment on an existing case, and `cases attach` uploads
+files to one:
+
+```bash
+walmart-case cases reply 10000001 --message-file answer.txt
+walmart-case cases attach 10000001 ./har.json ./adgroup.json
+```
+
+Neither is gated behind a confirmation flag, unlike `cases create`: they act on
+a case you already own, with no category mapping to get wrong. `create` files a
+*new* record into the support queue, which is the thing worth a second look.
+
+Both are writes, so **do not wrap them in a retry loop.** A network error after
+the write lands looks identical to one before it, and retrying uploads the file
+or posts the comment twice — the portal has no idempotency key.
+
+Deletion is asymmetric and this bites: an upload returns a **ContentVersion**
+id (`068…`), while the portal's delete actions want the **ContentDocument** id
+(`069…`) and silently do nothing when handed the other. The `069` ids are
+recoverable from a case's detail payload; `attachments.document_ids()` extracts
+them.
+
+Attaching *while filing* is not supported yet: `openCase` accepts a
+`documentId` list, but `saveChunk` requires a `parentId` and the case does not
+exist yet, so it is unclear what the portal passes at that point.
+
 ## Filing a case
 
 `cases create` prints the exact `openCase` payload and files nothing unless

@@ -28,7 +28,14 @@ _USER_AGENT = (
 _AURA_CONFIG = re.compile(r"auraConfig\s*=\s*\{")
 
 BOOTSTRAP_PAGE = "/s/contact?language=en_US"
-LOGIN_CONTROLLER = "LightningLoginFormController"
+
+# Authentication does not go through Aura at all: the portal still serves the
+# classic Salesforce login form, which POSTs to /login and answers with a
+# redirect to /secur/frontdoor.jsp?sid=... that mints the session cookies.
+LOGIN_PAGE = "/login"
+_LOGIN_FORM = re.compile(r'<form name="login".*?</form>', re.DOTALL)
+_INPUT = re.compile(r"<input[^>]*>")
+_ATTR = re.compile(r'(\w+)="([^"]*)"')
 
 
 @dataclass(frozen=True)
@@ -107,19 +114,46 @@ def check_auth(client: httpx.Client, page: str = BOOTSTRAP_PAGE) -> AuthState:
     return read_auth_state(response.text)
 
 
+def _login_form_fields(html: str) -> dict[str, str]:
+    """Collect the login form's own hidden fields.
+
+    Copying whatever the form ships (``lt``, ``pqs``, ``display`` …) rather than
+    hardcoding a list means a new hidden field is carried along automatically.
+    """
+    form = _LOGIN_FORM.search(html)
+    if not form:
+        raise SessionExpired("login", "could not find the login form on the login page")
+    fields: dict[str, str] = {}
+    for tag in _INPUT.findall(form.group(0)):
+        attrs = dict(_ATTR.findall(tag))
+        name = attrs.get("name")
+        if name and attrs.get("type") != "submit":
+            fields[name] = attrs.get("value", "")
+    return fields
+
+
 def login(client: httpx.Client, cfg: Config, page: str = BOOTSTRAP_PAGE) -> AuthState:
-    """Authenticate through the community login form's Aura controller."""
+    """Authenticate with username and password through the classic login form."""
     if not cfg.has_credentials:
         raise SessionExpired(
             "login",
             "no username/password configured, so the session cannot be renewed",
         )
-    session = AuraSession.bootstrap(client, page)
-    session.controller(
-        LOGIN_CONTROLLER,
-        "login",
-        {"username": cfg.username, "password": cfg.password, "startUrl": page},
-    )
+    form_page = client.get(LOGIN_PAGE, params={"startURL": page})
+    form_page.raise_for_status()
+
+    fields = _login_form_fields(form_page.text)
+    # ``un`` is what the form's own onsubmit handler copies the username into.
+    fields |= {
+        "username": cfg.username,
+        "un": cfg.username,
+        "pw": cfg.password,
+        "startURL": page,
+        "Login": "Log In",
+    }
+    # The response redirects through frontdoor.jsp, which sets the session
+    # cookies; httpx follows it because the client allows redirects.
+    client.post(LOGIN_PAGE, data=fields).raise_for_status()
     return check_auth(client, page)
 
 

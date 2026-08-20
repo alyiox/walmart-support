@@ -55,3 +55,29 @@ def test_login_without_credentials_raises_session_expired(guest_page: str) -> No
     )
     with pytest.raises(SessionExpired, match="no username/password"):
         login(client, _cfg())
+
+
+def test_login_form_fields_are_copied_from_the_page() -> None:
+    from mcp_walmart_support.auth import _login_form_fields
+
+    html = (
+        '<form name="login" method="post" action="/login">'
+        '<input type="hidden" name="lt" value="standard"/>'
+        '<input type="hidden" name="pqs" value="?startURL=%2Fs%2Factivity"/>'
+        '<input type="email" name="username" value=""/>'
+        '<input type="password" name="pw" value=""/>'
+        '<input type="submit" name="Login" value="Log In"/>'
+        "</form>"
+    )
+    fields = _login_form_fields(html)
+    # hidden state is carried along; the submit button is not a field
+    assert fields["lt"] == "standard"
+    assert fields["pqs"] == "?startURL=%2Fs%2Factivity"
+    assert "Login" not in fields
+
+
+def test_login_form_missing_raises() -> None:
+    from mcp_walmart_support.auth import _login_form_fields
+
+    with pytest.raises(SessionExpired, match="could not find the login form"):
+        _login_form_fields("<html>no form here</html>")

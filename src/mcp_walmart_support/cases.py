@@ -240,6 +240,14 @@ def post_comment(session: AuraSession, case_id: str, message: str) -> list[Comme
     return sorted(comments, key=lambda c: c.created_date)
 
 
+def close_case(session: AuraSession, case_id: str) -> str:
+    """Close a case and return the status the portal reports afterwards."""
+    raw = session.apex(_DETAIL_COMPONENT, "closeCaseSt", {"caseID": case_id})
+    if isinstance(raw, dict):
+        return str(raw.get("Status") or "")
+    return ""
+
+
 def fetch_cases(session: AuraSession, limit: int | None = None) -> list[Case]:
     """Return cases visible to the logged-in community user, newest first.
 

@@ -189,10 +189,23 @@ def test_payload_declares_every_parameter() -> None:
 def test_additional_fields_only_carry_declared_ones() -> None:
     payload = prepare(_session(), CaseDraft(subject="s", description="d", advertisers="1, 2"))
     extra = json.loads(payload["additionalFieldsString"])
-    assert extra["Advertisers Affected"] == "1, 2"
-    assert extra["Description"] == "d"
+    # a JSON list of title/value pairs: Apex deserializes it into a List, and
+    # rejects any other key by name
+    assert isinstance(extra, list)
+    by_title = {item["title"]: item["value"] for item in extra}
+    assert by_title["Advertisers Affected"] == "1, 2"
+    assert by_title["Description"] == "d"
     # not declared by this category, so not sent
-    assert "Advertiser Account Name" not in extra
+    assert "Advertiser Account Name" not in by_title
+
+
+def test_partnership_fields_are_left_empty() -> None:
+    payload = prepare(_session(), CaseDraft(subject="s", description="d"))
+    # Partnership__c is a lookup to a Partnership record, not an Account; an
+    # account id there fails the insert with FIELD_INTEGRITY_EXCEPTION
+    assert payload["partnershipType"] == ""
+    assert payload["partnershipId"] == ""
+    assert payload["selectedAccountId"] == "0014M00000EXAMPLE"
 
 
 def test_search_platform_flows_through_to_the_payload() -> None:

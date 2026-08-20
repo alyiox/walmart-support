@@ -91,11 +91,31 @@ Sponsored Products as its platform. Sponsored Brands and Videos are accepted
 but the portal publishes no categories for them on a partner account, and the
 error says so.
 
-> **Unverified:** the identity and category parameters are confirmed — the
-> resolved `API-AdCases` backend value matches what a filed case reports — but
-> the remaining `openCase` parameters are inferred from the published method
-> signature, not from an observed submit. Compare the payload printed without
-> `--submit` against a real submit before trusting `--submit`.
+`openCase` returns the new case's number, and the whole path is verified
+end to end — filed, replied to and closed. Three things had to be right, none
+of which the method signature revealed:
+
+* `additionalFieldsString` is a JSON **list** of `{title, value}` objects, not
+  an object. Apex deserializes it into a `List` and names any unexpected key.
+* `partnershipType`/`partnershipId` must be **empty**. `Partnership__c` is a
+  lookup to a Partnership record for supplier and seller channels, so an
+  account id there fails the insert with `FIELD_INTEGRITY_EXCEPTION`.
+* Category routing comes from the resolved level-1/level-2 pair, and a filed
+  case reports `API-AdCases` / `Endpoint-specific problem` back.
+
+> **Known defect:** the portal does not associate additional fields by the
+> `title` we send — it relabels `Name`/`Email` to `Contact Name`/`Contact
+> Email` and mis-assigns the rest, so `Advertisers Affected` can come out
+> holding the account name. The wrapper evidently carries an identifier field
+> beyond `title`/`value`. Until that is pinned down, put anything that matters
+> in the description body, which is stored verbatim.
+
+### Closing and replying
+
+```bash
+walmart-case cases reply 15971149 --message-file answer.txt
+walmart-case cases close 15971149      # New -> Closed
+```
 
 ## Sessions
 

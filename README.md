@@ -1,0 +1,84 @@
+# Walmart Connect Advertising Support Cases
+
+[![CI](https://github.com/alyiox/mcp-walmart-support/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alyiox/mcp-walmart-support/actions/workflows/ci.yml)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+<!-- mcp-name: io.github.alyiox/mcp-walmart-support -->
+
+CLI for reading and filing [Walmart Connect](https://advertisinghelp.walmart.com) advertising
+support cases without driving a browser.
+
+The Advertising Help portal is a Salesforce Experience Cloud site with no public API. Every click in
+its UI is one POST to `/s/sfsites/aura` naming an `@AuraEnabled` Apex method, so the flow is
+scriptable — which matters, because submitting a case body through a headless browser is slow and,
+in some environments, unreliable enough to leave you unsure whether a case was actually filed.
+
+## Status
+
+Early. `auth check` works; case read and create commands are landing as their Aura payloads are
+captured from the portal UI.
+
+## Requirements
+
+- Python 3.13+
+- A Walmart Advertising Help portal account (the Partners → Help Site login)
+
+## Quick start
+
+```bash
+mkdir -p ~/.config/mcp-walmart-support
+cp config.example.json ~/.config/mcp-walmart-support/config.json
+$EDITOR ~/.config/mcp-walmart-support/config.json
+
+uv run walmart-case auth check
+```
+
+## Configuration
+
+`~/.config/mcp-walmart-support/config.json`:
+
+| Key | Required | Description |
+| --- | --- | --- |
+| `base_url` | no | Portal origin. Defaults to `https://advertisinghelp.walmart.com`. |
+| `username` | yes\* | Portal login email. |
+| `password` | yes\* | Portal password. |
+| `cookie` | no | An existing `sid` session cookie, used in preference to logging in. |
+| `timeout` | no | Per-request timeout in seconds (default 60). |
+
+\* Either `username` + `password` or `cookie` must be present. Every key can be overridden by an
+environment variable — `WALMART_SUPPORT_USERNAME`, `WALMART_SUPPORT_PASSWORD`,
+`WALMART_SUPPORT_COOKIE`, `WALMART_SUPPORT_BASE_URL`, `WALMART_SUPPORT_TIMEOUT` — so CI needs no
+file on disk.
+
+Prefer credentials over a cookie for anything unattended: Salesforce `sid` cookies are
+session-scoped, so they do not survive a browser restart and expire on their own. When a session
+dies mid-run the CLI re-authenticates and retries.
+
+## How it works
+
+```
+GET  /s/contact                     scrape the Aura context (fwuid, apck, lrmc, markup hash)
+POST /s/sfsites/aura?r=N&...login   authenticate via LightningLoginFormController
+POST /s/sfsites/aura?r=N&other....  call @AuraEnabled Apex methods through ApexActionController
+```
+
+Aura rejects any call whose framework context does not match the deployed build, and that context
+rotates with every Salesforce release, so it is scraped on each run and never hardcoded. All of this
+lives in `aura.py`; when Walmart's contract shifts, that is the one module to re-capture against.
+
+## Development
+
+```bash
+uv sync --group dev
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
+uv run pyright
+uv run pytest tests/ -v
+```
+
+Tests are offline: they exercise recorded page shapes and Aura envelopes through `httpx.MockTransport`.
+
+## License
+
+MIT

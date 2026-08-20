@@ -36,14 +36,15 @@ uv run walmart-case cases list --status "need info"
 uv run walmart-case cases get 15957474
 uv run walmart-case cases replies 15957474 --from-walmart
 
-# discover what to file under, then file
-uv run walmart-case categories list --platform sponsored-search
 uv run walmart-case cases create \
   --platform display \
   --category "API Support" --issue "Endpoint-specific problem" \
   --subject "Display API: ..." --advertisers "241727, 244985" \
   --description-file ./body.txt          # prints the payload
 uv run walmart-case cases create ... --submit   # actually files it
+
+# where the --category and --issue names come from
+uv run walmart-case categories list --platform sponsored-search
 ```
 
 ## Filing a case

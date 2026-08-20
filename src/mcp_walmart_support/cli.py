@@ -271,9 +271,9 @@ _EXAMPLES = """examples:
   walmart-case cases get 15957474             one case, full text
   walmart-case cases replies 15957474 --from-walmart --latest 1
   walmart-case cases list --query "adGroups/list" --since 30d --deep
-  walmart-case categories list --platform sponsored-search
   walmart-case cases create --subject ... --description-file body.txt
                                               prints the payload; add --submit to file
+  walmart-case categories list --platform sponsored-search
 
 notes:
   every command takes --json for machine-readable output

@@ -13,7 +13,6 @@ def _cfg(**kw: object) -> Config:
         "base_url": "https://portal.test",
         "username": "",
         "password": "",
-        "cookie": "",
         "timeout": 10,
     }
     return Config(**(base | kw))  # type: ignore[arg-type]
@@ -31,10 +30,10 @@ def test_falls_back_when_aura_config_unparseable() -> None:
     assert read_auth_state("nothing here").authenticated is False
 
 
-def test_cookie_is_sent_as_sid() -> None:
-    client = build_client(_cfg(cookie="sekret"))
+def test_cached_cookies_are_sent() -> None:
+    client = build_client(_cfg(), {"sid": "from-cache"})
     try:
-        assert client.cookies.get("sid") == "sekret"
+        assert client.cookies.get("sid") == "from-cache"
     finally:
         client.close()
 

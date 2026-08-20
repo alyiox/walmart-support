@@ -63,7 +63,7 @@ def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
     client = build_client(cfg, cached)
     try:
         state = check_auth(client)
-        source = "cache" if cached else ("cookie" if cfg.has_cookie else "none")
+        source = "cache" if cached else "none"
         if not state.authenticated and cfg.has_credentials:
             state = login(client, cfg)
             source = "login"

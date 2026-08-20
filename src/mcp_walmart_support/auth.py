@@ -6,8 +6,7 @@ through ``frontdoor.jsp`` that mints the session cookies.
 
 Because each CLI invocation is its own process, those cookies are cached on
 disk and reused until the portal rejects them; otherwise every command would
-pay a full login. A session can also be supplied directly via config, which is
-useful when login is blocked (MFA, captcha) but does not survive expiry.
+pay a full login.
 """
 
 from __future__ import annotations
@@ -94,15 +93,12 @@ def clear_session(path: Path | None = None) -> bool:
 
 
 def build_client(cfg: Config, cookies: dict[str, str] | None = None) -> httpx.Client:
-    cookies = dict(cookies or {})
-    if cfg.has_cookie:
-        cookies["sid"] = cfg.cookie
     return httpx.Client(
         base_url=cfg.base_url,
         timeout=cfg.timeout,
         follow_redirects=True,
         headers={"User-Agent": _USER_AGENT},
-        cookies=cookies,
+        cookies=dict(cookies or {}),
     )
 
 
@@ -218,7 +214,7 @@ def open_session(
     """
     cached = load_session() if use_cache else {}
     client = build_client(cfg, cached)
-    source = "cache" if cached else ("cookie" if cfg.has_cookie else "none")
+    source = "cache" if cached else "none"
 
     state = check_auth(client, page)
     if not state.authenticated:
@@ -227,6 +223,8 @@ def open_session(
         if not state.authenticated:
             client.close()
             raise SessionExpired("login", "portal still reports an unauthenticated session")
+
+    if source == "login":
         save_session(client)
 
     return client, AuraSession.bootstrap(client, page), source

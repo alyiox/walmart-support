@@ -345,11 +345,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="file holding the case body; keeps long payloads out of the shell",
     )
     create.add_argument("--advertisers", help="advertiser/profile ids affected")
-    create.add_argument("--category", default="API", help="level-1 category (default: API)")
+    create.add_argument(
+        "--category",
+        default="API",
+        help="level-1 category, per 'categories list' (default: API)",
+    )
     create.add_argument(
         "--issue",
         default="Endpoint-specific problem",
-        help="level-2 issue (default: Endpoint-specific problem)",
+        help="level-2 issue, per 'categories list' (default: Endpoint-specific problem)",
     )
     create.add_argument(
         "--platform",

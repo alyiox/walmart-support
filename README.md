@@ -65,8 +65,8 @@ error says so.
 > **Unverified:** the identity and category parameters are confirmed — the
 > resolved `API-AdCases` backend value matches what a filed case reports — but
 > the remaining `openCase` parameters are inferred from the published method
-> signature, not from an observed submit. Review a `--dry-run` payload against a
-> real submit before trusting `--submit`.
+> signature, not from an observed submit. Compare the payload printed without
+> `--submit` against a real submit before trusting `--submit`.
 
 ## Sessions
 
@@ -111,8 +111,14 @@ plus status, priority, category and the submitted form fields.
 stores, with each message attributed to `us` or `WALMART`:
 
 ```bash
-walmart-case cases replies 10000001 --from-walmart --latest 1
+walmart-case cases replies 10000001                      # whole thread
+walmart-case cases replies 10000001 --from-walmart        # skip our own posts
+walmart-case cases replies 10000001 --latest 1            # just the newest
 ```
+
+Support's acknowledgement mails quote the entire case body back, and later
+replies quote the ones before them, so an unfiltered thread is mostly repetition
+of what you already sent — `--from-walmart --latest 1` is usually what you want.
 
 ## How it works
 

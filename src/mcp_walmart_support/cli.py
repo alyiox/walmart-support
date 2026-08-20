@@ -7,7 +7,9 @@ driving a browser. Case creation lands once its Aura payload is captured.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import sys
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
@@ -158,6 +160,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         return handler(cfg, args)
+    except BrokenPipeError:
+        # Piping into head/less closes stdout early; exit quietly instead of
+        # letting the interpreter report the failed flush at shutdown.
+        with contextlib.suppress(OSError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
     except AuraError as exc:
         print(f"portal error: {exc}", file=sys.stderr)
         return 1

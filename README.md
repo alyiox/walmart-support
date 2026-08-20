@@ -55,6 +55,13 @@ Prefer credentials over a cookie for anything unattended: Salesforce `sid` cooki
 session-scoped, so they do not survive a browser restart and expire on their own. When a session
 dies mid-run the CLI re-authenticates and retries.
 
+## Known limitations
+
+The portal's list action (`getCasesForCommunityUser`) returns **abbreviated**
+`subject` and `description` values for some cases — the trailing `...` comes from
+Walmart, not from this tool — and it is the only read endpoint the portal exposes,
+so there is currently no way to fetch the untruncated text for those cases.
+
 ## How it works
 
 ```

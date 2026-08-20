@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 from datetime import date
+from typing import Any
 
 import httpx
 import pytest
@@ -17,6 +18,7 @@ from mcp_walmart_support.cases import (
     filter_cases,
     find_case,
     html_to_text,
+    post_comment,
     pushdown_limit,
 )
 
@@ -215,7 +217,7 @@ def test_limit_is_pushed_down_only_when_unfiltered() -> None:
 
 
 def test_limit_reaches_the_portal_as_a_number() -> None:
-    seen: list[object] = []
+    seen: list[dict[str, Any]] = []
     page = make_page(authenticated=True)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -268,3 +270,45 @@ def test_deep_filter_refuses_to_fan_out_past_the_cap() -> None:
     cases = [Case.from_record({"caseNumber": str(n)}) for n in range(30)]
     with pytest.raises(TooManyCandidates, match="cap of 25"):
         deep_filter(_detail_session({}), cases, "anything")
+
+
+def test_post_comment_sends_the_portal_shape() -> None:
+    seen: list[dict[str, Any]] = []
+    page = make_page(authenticated=True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "aura" not in request.url.path:
+            return httpx.Response(200, text=page)
+        action = json.loads(urllib.parse.parse_qs(request.content.decode())["message"][0])[
+            "actions"
+        ][0]
+        seen.append(action)
+        return httpx.Response(
+            200,
+            text=json.dumps(
+                {
+                    "actions": [
+                        {
+                            "id": "1;a",
+                            "state": "SUCCESS",
+                            "returnValue": [
+                                {
+                                    "createdDate": "2026-08-20T01:00:00.000Z",
+                                    "name": "Ada Advertiser",
+                                    "isAdvertiser": True,
+                                    "textbody": "<div>answer</div>",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
+    session = AuraSession.bootstrap(client, "/s/activity")
+    comments = post_comment(session, "500KW1", "answer")
+    assert seen[0]["descriptor"] == "apex://AC_CaseDetailController/ACTION$saveCaseComment"
+    # the portal's comment box submits attachment removals with the text
+    assert seen[0]["params"] == {"comment": "answer", "caseID": "500KW1", "filesToDelete": ""}
+    assert comments[0].body == "answer" and comments[0].from_advertiser

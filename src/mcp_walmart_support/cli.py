@@ -18,7 +18,16 @@ from pathlib import Path
 import httpx
 
 from .aura import AuraError
-from .auth import authenticated_session, build_client, check_auth, login
+from .auth import (
+    SESSION_PATH,
+    build_client,
+    check_auth,
+    clear_session,
+    load_session,
+    login,
+    save_session,
+    with_session,
+)
 from .cases import ACTIVITY_PAGE, Case, fetch_cases, filter_cases, find_case
 from .config import CONFIG_PATH, Config, load_config
 
@@ -50,18 +59,22 @@ def _parse_since(value: str) -> date:
 
 
 def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
-    client = build_client(cfg)
+    cached = load_session()
+    client = build_client(cfg, cached)
     try:
         state = check_auth(client)
-        source = "cookie" if cfg.has_cookie else "none"
+        source = "cache" if cached else ("cookie" if cfg.has_cookie else "none")
         if not state.authenticated and cfg.has_credentials:
             state = login(client, cfg)
             source = "login"
+            if state.authenticated:
+                save_session(client)
         payload = {
             "authenticated": state.authenticated,
             "auth_source": source,
             "username": cfg.username or "(not configured)",
             "base_url": cfg.base_url,
+            "session_cache": str(SESSION_PATH),
         }
         print(json.dumps(payload, indent=2)) if args.json else _print_fields(payload)
         return 0 if state.authenticated else 1
@@ -69,45 +82,43 @@ def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
         client.close()
 
 
+def _cmd_auth_logout(cfg: Config, args: argparse.Namespace) -> int:
+    removed = clear_session()
+    print("cached session discarded" if removed else "no cached session")
+    return 0
+
+
 def _cmd_cases_list(cfg: Config, args: argparse.Namespace) -> int:
-    client, session = authenticated_session(cfg, ACTIVITY_PAGE)
-    try:
-        cases = filter_cases(
-            fetch_cases(session),
-            status=args.status,
-            since=_parse_since(args.since) if args.since else None,
-            query=args.query,
-        )
-        if args.limit:
-            cases = cases[: args.limit]
-        if args.json:
-            print(json.dumps([c.as_dict() for c in cases], indent=2))
-        else:
-            _print_table(cases)
-        return 0
-    finally:
-        client.close()
+    cases = filter_cases(
+        with_session(cfg, ACTIVITY_PAGE, fetch_cases),
+        status=args.status,
+        since=_parse_since(args.since) if args.since else None,
+        query=args.query,
+    )
+    if args.limit:
+        cases = cases[: args.limit]
+    if args.json:
+        print(json.dumps([c.as_dict() for c in cases], indent=2))
+    else:
+        _print_table(cases)
+    return 0
 
 
 def _cmd_cases_get(cfg: Config, args: argparse.Namespace) -> int:
-    client, session = authenticated_session(cfg, ACTIVITY_PAGE)
-    try:
-        case = find_case(fetch_cases(session), args.case_number)
-        if case is None:
-            print(f"case {args.case_number} not found", file=sys.stderr)
-            return 1
-        if args.json:
-            print(json.dumps(case.as_dict(), indent=2))
-        else:
-            payload = case.as_dict()
-            description = str(payload.pop("description", ""))
-            _print_fields(payload)
-            if description:
-                print("\ndescription\n")
-                print(description)
-        return 0
-    finally:
-        client.close()
+    case = find_case(with_session(cfg, ACTIVITY_PAGE, fetch_cases), args.case_number)
+    if case is None:
+        print(f"case {args.case_number} not found", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(case.as_dict(), indent=2))
+    else:
+        payload = case.as_dict()
+        description = str(payload.pop("description", ""))
+        _print_fields(payload)
+        if description:
+            print("\ndescription\n")
+            print(description)
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -123,6 +134,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="auth_command", required=True
     )
     auth.add_parser("check", help="report whether the portal session is authenticated")
+    auth.add_parser("logout", help="discard the cached session")
 
     cases = sub.add_parser("cases", help="read support cases").add_subparsers(
         dest="cases_command", required=True
@@ -150,6 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handlers = {
         ("auth", "check"): _cmd_auth_check,
+        ("auth", "logout"): _cmd_auth_logout,
         ("cases", "list"): _cmd_cases_list,
         ("cases", "get"): _cmd_cases_get,
     }

@@ -1,17 +1,23 @@
-"""Portal authentication.
+"""Portal authentication and session reuse.
 
-Two ways in, because neither is reliable alone: scripted login through the
-community login form (headless, but breaks if MFA or a captcha appears), and a
-supplied session cookie (works when login is blocked, but Salesforce ``sid``
-cookies are session-scoped, so they die with the browser and expire on their
-own). A cookie is used when present and login is the fallback.
+Authentication does not go through Aura: the portal still serves the classic
+Salesforce login form, which POSTs to ``/login`` and answers with a redirect
+through ``frontdoor.jsp`` that mints the session cookies.
+
+Because each CLI invocation is its own process, those cookies are cached on
+disk and reused until the portal rejects them; otherwise every command would
+pay a full login. A session can also be supplied directly via config, which is
+useful when login is blocked (MFA, captcha) but does not survive expiry.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -26,6 +32,16 @@ _USER_AGENT = (
 # The bootstrap page states plainly whether the visitor is authenticated, which
 # is a cheaper and more stable check than calling an Apex action.
 _AURA_CONFIG = re.compile(r"auraConfig\s*=\s*\{")
+
+# Each CLI invocation is its own process, so without a cache every command pays
+# a full login — four requests and a Salesforce login event before any real
+# work. Session cookies are cached here and reused until the portal rejects
+# them. The file holds live session cookies, so it is written 0600.
+SESSION_PATH = (
+    Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    / "mcp-walmart-support"
+    / "session.json"
+)
 
 BOOTSTRAP_PAGE = "/s/contact?language=en_US"
 
@@ -45,8 +61,40 @@ class AuthState:
     page_id: str | None = None
 
 
-def build_client(cfg: Config) -> httpx.Client:
-    cookies = {}
+def load_session(path: Path | None = None) -> dict[str, str]:
+    """Return cached session cookies, or an empty mapping if there are none."""
+    path = path or SESSION_PATH
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    cookies = data.get("cookies") if isinstance(data, dict) else None
+    if not isinstance(cookies, dict):
+        return {}
+    return {str(k): str(v) for k, v in cookies.items()}
+
+
+def save_session(client: httpx.Client, path: Path | None = None) -> None:
+    """Persist the client's cookies for the next invocation."""
+    path = path or SESSION_PATH
+    cookies = {c.name: c.value or "" for c in client.cookies.jar}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"cookies": cookies}))
+    path.chmod(0o600)
+
+
+def clear_session(path: Path | None = None) -> bool:
+    """Delete the cached session. Returns whether a file was removed."""
+    path = path or SESSION_PATH
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def build_client(cfg: Config, cookies: dict[str, str] | None = None) -> httpx.Client:
+    cookies = dict(cookies or {})
     if cfg.has_cookie:
         cookies["sid"] = cfg.cookie
     return httpx.Client(
@@ -157,19 +205,58 @@ def login(client: httpx.Client, cfg: Config, page: str = BOOTSTRAP_PAGE) -> Auth
     return check_auth(client, page)
 
 
-def authenticated_session(
-    cfg: Config, page: str = BOOTSTRAP_PAGE
-) -> tuple[httpx.Client, AuraSession]:
-    """Return a client and Aura session that are known to be logged in.
+def open_session(
+    cfg: Config,
+    page: str = BOOTSTRAP_PAGE,
+    *,
+    use_cache: bool = True,
+) -> tuple[httpx.Client, AuraSession, str]:
+    """Return a client, an Aura session, and how the session was obtained.
 
-    Tries the configured cookie first and logs in when it is absent or stale,
-    which is the common case: ``sid`` cookies do not survive a browser restart.
+    A cached session is reused when the portal still accepts it, which keeps the
+    common case down to two requests and avoids a login event per command.
     """
-    client = build_client(cfg)
+    cached = load_session() if use_cache else {}
+    client = build_client(cfg, cached)
+    source = "cache" if cached else ("cookie" if cfg.has_cookie else "none")
+
     state = check_auth(client, page)
     if not state.authenticated:
         state = login(client, cfg, page)
+        source = "login"
         if not state.authenticated:
             client.close()
             raise SessionExpired("login", "portal still reports an unauthenticated session")
-    return client, AuraSession.bootstrap(client, page)
+        save_session(client)
+
+    return client, AuraSession.bootstrap(client, page), source
+
+
+def with_session[T](
+    cfg: Config,
+    page: str,
+    action: Callable[[AuraSession], T],
+    *,
+    use_cache: bool = True,
+) -> T:
+    """Run ``action`` against an authenticated session.
+
+    A cached session can expire between commands, and Salesforce signals that
+    mid-request rather than up front, so retry once from a clean login instead
+    of surfacing an error the user can do nothing about.
+    """
+    client, session, source = open_session(cfg, page, use_cache=use_cache)
+    try:
+        return action(session)
+    except SessionExpired:
+        if source != "cache":
+            raise
+    finally:
+        client.close()
+
+    clear_session()
+    client, session, _ = open_session(cfg, page, use_cache=False)
+    try:
+        return action(session)
+    finally:
+        client.close()

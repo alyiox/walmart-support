@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from .aura import AuraError
+from .aura import AuraError, AuraSession
 from .auth import (
     SESSION_PATH,
     build_client,
@@ -31,9 +31,12 @@ from .auth import (
 from .cases import (
     ACTIVITY_PAGE,
     Case,
+    TooManyCandidates,
+    deep_filter,
     fetch_case_detail,
     fetch_cases,
     filter_cases,
+    pushdown_limit,
 )
 from .config import CONFIG_PATH, Config, load_config
 from .create import (
@@ -105,12 +108,25 @@ def _cmd_auth_logout(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def _cmd_cases_list(cfg: Config, args: argparse.Namespace) -> int:
-    cases = filter_cases(
-        with_session(cfg, ACTIVITY_PAGE, fetch_cases),
-        status=args.status,
-        since=_parse_since(args.since) if args.since else None,
-        query=args.query,
-    )
+    since = _parse_since(args.since) if args.since else None
+    filtered = bool(args.status or since or args.query)
+
+    def run(session: AuraSession) -> list[Case]:
+        cases = fetch_cases(session, pushdown_limit(args.limit, filtered=filtered))
+        narrowed = filter_cases(
+            cases,
+            status=args.status,
+            since=since,
+            # a deep search must not pre-filter on the abbreviated text
+            query=None if args.deep else args.query,
+        )
+        if args.deep and args.query:
+            if args.limit:
+                narrowed = narrowed[: args.limit]
+            return deep_filter(session, narrowed, args.query)
+        return narrowed
+
+    cases = with_session(cfg, ACTIVITY_PAGE, run)
     if args.limit:
         cases = cases[: args.limit]
     if args.json:
@@ -271,6 +287,11 @@ def _build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--since", help="ISO date or day offset such as 30d")
     listing.add_argument("--query", help="substring match on subject or description")
     listing.add_argument("--limit", type=int, default=0, help="show at most N cases")
+    listing.add_argument(
+        "--deep",
+        action="store_true",
+        help="match --query against full case text and replies (one request per case)",
+    )
 
     detail = cases.add_parser("get", help="show one case in full")
     detail.add_argument("case_number")
@@ -354,6 +375,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         with contextlib.suppress(OSError):
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
+    except TooManyCandidates as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
     except AuraError as exc:
         print(f"portal error: {exc}", file=sys.stderr)
         return 1

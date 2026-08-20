@@ -107,6 +107,32 @@ are managed by the cache below instead.
 Walmart. `cases get` uses the detail action instead, which returns the full text
 plus status, priority, category and the submitted form fields.
 
+### Searching
+
+`cases list --query` filters on the text the list action returns — and that text
+is **abbreviated**: subjects are cut to roughly 46 characters, and some cases
+carry almost no description at all. So a plain `--query` can miss a case whose
+real body contains the term.
+
+`--deep` re-reads each candidate's full text *and its replies* instead, at one
+request per candidate:
+
+```bash
+# finds nothing: the term sits past where the list truncates the subject
+walmart-case cases list --query "targeting of a LIVE ad group"
+
+# finds both cases
+walmart-case cases list --query "targeting of a LIVE ad group" --since 2026-08-01 --deep
+```
+
+Because it fans out, `--deep` refuses to run on more candidates than its cap
+(25) and asks you to narrow with `--status`/`--since`/`--limit` rather than
+firing a request per case in the account.
+
+`--limit` on its own is handed to the portal as a SOQL `LIMIT`. Combined with a
+filter it stays client-side, since the server would otherwise apply it *before*
+filtering and return matches from an arbitrary slice.
+
 `cases replies` shows the case conversation, flattened from the HTML the portal
 stores, with each message attributed to `us` or `WALMART`:
 

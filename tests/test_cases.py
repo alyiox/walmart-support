@@ -10,11 +10,14 @@ import pytest
 from mcp_walmart_support.aura import AuraError, AuraSession
 from mcp_walmart_support.cases import (
     Case,
+    TooManyCandidates,
+    deep_filter,
     fetch_case_detail,
     fetch_cases,
     filter_cases,
     find_case,
     html_to_text,
+    pushdown_limit,
 )
 
 from .conftest import make_page
@@ -199,3 +202,69 @@ def test_missing_case_raises() -> None:
 
 def test_html_to_text_keeps_paragraph_breaks() -> None:
     assert html_to_text("<div>one</div><br><div>two</div>") == "one\n\ntwo"
+
+
+# --- limit pushdown and deep search ---------------------------------------
+
+
+def test_limit_is_pushed_down_only_when_unfiltered() -> None:
+    # the portal applies it as a SOQL LIMIT, i.e. before filtering
+    assert pushdown_limit(6, filtered=False) == 6
+    assert pushdown_limit(6, filtered=True) is None
+    assert pushdown_limit(0, filtered=False) is None
+
+
+def test_limit_reaches_the_portal_as_a_number() -> None:
+    seen: list[object] = []
+    page = make_page(authenticated=True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "aura" not in request.url.path:
+            return httpx.Response(200, text=page)
+        fields = urllib.parse.parse_qs(request.content.decode())
+        seen.append(json.loads(fields["message"][0])["actions"][0]["params"])
+        return httpx.Response(
+            200,
+            text=json.dumps({"actions": [{"id": "1;a", "state": "SUCCESS", "returnValue": []}]}),
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
+    session = AuraSession.bootstrap(client, "/s/activity")
+    fetch_cases(session, 6)
+    fetch_cases(session)
+    assert seen == [{"casesTofetch": "6"}, {"casesTofetch": ""}]
+
+
+def test_deep_filter_reads_full_text_the_list_truncates() -> None:
+    # the list abbreviates subject; the full text only appears in the detail
+    detail = {
+        "detail": {
+            "CaseNumber": "15957474",
+            "Subject": "Display API: audience ARCHIVED while referenced by a LIVE ad group",
+            "Description": "c",
+        },
+        "comments": [],
+    }
+    session = _detail_session(detail)
+    truncated = Case.from_record(
+        {"caseNumber": "15957474", "subject": "Display API: audience ARCH...", "description": "c"}
+    )
+    assert filter_cases([truncated], query="LIVE ad group") == []
+    assert deep_filter(session, [truncated], "LIVE ad group") == [truncated]
+
+
+def test_deep_filter_searches_replies_too() -> None:
+    detail = {
+        "detail": {"CaseNumber": "15957474", "Subject": "s", "Description": "d"},
+        "comments": [
+            {"name": "Advertiser Help", "isAdvertiser": False, "textbody": "notified the Eng team"}
+        ],
+    }
+    case = Case.from_record({"caseNumber": "15957474", "subject": "s", "description": "d"})
+    assert deep_filter(_detail_session(detail), [case], "eng team") == [case]
+
+
+def test_deep_filter_refuses_to_fan_out_past_the_cap() -> None:
+    cases = [Case.from_record({"caseNumber": str(n)}) for n in range(30)]
+    with pytest.raises(TooManyCandidates, match="cap of 25"):
+        deep_filter(_detail_session({}), cases, "anything")

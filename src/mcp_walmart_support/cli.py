@@ -264,10 +264,29 @@ def _describe_payload(payload: object) -> str:
     return "\n".join(lines)
 
 
+_EXAMPLES = """examples:
+  walmart-case auth check                     confirm the portal session
+  walmart-case cases list --status "need info"    cases awaiting a response
+  walmart-case cases list --since 30d --limit 10
+  walmart-case cases get 10000001             one case, full text
+  walmart-case cases replies 10000001 --from-walmart --latest 1
+  walmart-case cases list --query "adGroups/list" --since 30d --deep
+  walmart-case categories list --platform sponsored-search
+  walmart-case case create --subject ... --description-file body.txt
+                                              prints the payload; add --submit to file
+
+notes:
+  every command takes --json for machine-readable output
+  case create files nothing unless --submit is given
+"""
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="walmart-case",
         description="Read and file Walmart Connect advertising support cases.",
+        epilog=_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--config", default=None, help=f"config file (default: {CONFIG_PATH})")
@@ -283,9 +302,15 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="cases_command", required=True
     )
     listing = cases.add_parser("list", help="list cases, newest first")
-    listing.add_argument("--status", help="substring match on status, e.g. 'need info'")
+    listing.add_argument(
+        "--status",
+        help="match status by words: 'need info' also matches 'Needs Info - Internal'",
+    )
     listing.add_argument("--since", help="ISO date or day offset such as 30d")
-    listing.add_argument("--query", help="substring match on subject or description")
+    listing.add_argument(
+        "--query",
+        help="match the abbreviated subject/description the list returns; add --deep for full text",
+    )
     listing.add_argument("--limit", type=int, default=0, help="show at most N cases")
     listing.add_argument(
         "--deep",

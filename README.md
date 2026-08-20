@@ -55,19 +55,18 @@ front. `walmart-case auth logout` discards the cached session.
 | Key | Required | Description |
 | --- | --- | --- |
 | `base_url` | no | Portal origin. Defaults to `https://advertisinghelp.walmart.com`. |
-| `username` | yes\* | Portal login email. |
-| `password` | yes\* | Portal password. |
-| `cookie` | no | An existing `sid` session cookie, used in preference to logging in. |
+| `username` | yes | Portal login email. |
+| `password` | yes | Portal password. |
 | `timeout` | no | Per-request timeout in seconds (default 60). |
 
-\* Either `username` + `password` or `cookie` must be present. Every key can be overridden by an
-environment variable — `WALMART_SUPPORT_USERNAME`, `WALMART_SUPPORT_PASSWORD`,
-`WALMART_SUPPORT_COOKIE`, `WALMART_SUPPORT_BASE_URL`, `WALMART_SUPPORT_TIMEOUT` — so CI needs no
+Every key can be overridden by an environment variable — `WALMART_SUPPORT_USERNAME`,
+`WALMART_SUPPORT_PASSWORD`, `WALMART_SUPPORT_BASE_URL`, `WALMART_SUPPORT_TIMEOUT` — so CI needs no
 file on disk.
 
-Prefer credentials over a cookie for anything unattended: Salesforce `sid` cookies are
-session-scoped, so they do not survive a browser restart and expire on their own. When a session
-dies mid-run the CLI re-authenticates and retries.
+Credentials are the only way in, deliberately. A session cookie cannot be configured by hand:
+Salesforce `sid` cookies are session-scoped, expire on their own, and cannot renew themselves, so a
+configured one becomes a stale secret that fails in a way the tool can do nothing about. Sessions
+are managed by the cache below instead.
 
 ## Known limitations
 

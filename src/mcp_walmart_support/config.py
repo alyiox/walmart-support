@@ -17,20 +17,15 @@ _ENV_PREFIX = "WALMART_SUPPORT_"
 class Config:
     """Portal connection settings.
 
-    Either ``cookie`` or both ``username``/``password`` must be present; the
-    cookie takes precedence so a live browser session can be reused before
-    credentials are provisioned.
+    Username and password are the only way in: they are the only credential
+    that can renew an expired session, and sessions themselves are managed by
+    the on-disk cache rather than configured by hand.
     """
 
     base_url: str
     username: str
     password: str
-    cookie: str
     timeout: int
-
-    @property
-    def has_cookie(self) -> bool:
-        return bool(self.cookie)
 
     @property
     def has_credentials(self) -> bool:
@@ -54,8 +49,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     base_url = _env("BASE_URL") or str(raw.get("base_url") or DEFAULT_BASE_URL)
     username = _env("USERNAME") or str(raw.get("username") or "")
     password = _env("PASSWORD") or str(raw.get("password") or "")
-    cookie = _env("COOKIE") or str(raw.get("cookie") or "")
-
     timeout_raw = _env("TIMEOUT") or raw.get("timeout") or DEFAULT_TIMEOUT
     timeout = int(timeout_raw) if isinstance(timeout_raw, str | int) else DEFAULT_TIMEOUT
 
@@ -63,14 +56,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         base_url=base_url.rstrip("/"),
         username=username,
         password=password,
-        cookie=cookie,
         timeout=timeout,
     )
 
-    if not cfg.has_cookie and not cfg.has_credentials:
+    if not cfg.has_credentials:
         raise RuntimeError(
-            f"No credentials found. Create {path} based on config.example.json "
-            f"(username + password), or set {_ENV_PREFIX}COOKIE / "
-            f"{_ENV_PREFIX}USERNAME and {_ENV_PREFIX}PASSWORD."
+            f"No credentials found. Create {path} based on config.example.json, "
+            f"or set {_ENV_PREFIX}USERNAME and {_ENV_PREFIX}PASSWORD."
         )
     return cfg

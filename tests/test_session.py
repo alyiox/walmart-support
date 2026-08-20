@@ -26,7 +26,6 @@ def _cfg(**kw: object) -> Config:
         "base_url": "https://portal.test",
         "username": "u@example.com",
         "password": "pw",
-        "cookie": "",
         "timeout": 10,
     }
     return Config(**(base | kw))  # type: ignore[arg-type]

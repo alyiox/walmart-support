@@ -34,6 +34,7 @@ $EDITOR ~/.config/mcp-walmart-support/config.json
 uv run walmart-case auth check
 uv run walmart-case cases list --status "need info"
 uv run walmart-case cases get 10000001
+uv run walmart-case cases replies 10000001 --from-walmart
 
 # discover what to file under, then file
 uv run walmart-case categories list --platform sponsored-search
@@ -99,12 +100,19 @@ Salesforce `sid` cookies are session-scoped, expire on their own, and cannot ren
 configured one becomes a stale secret that fails in a way the tool can do nothing about. Sessions
 are managed by the cache below instead.
 
-## Known limitations
+## Reading a case
 
-The portal's list action (`getCasesForCommunityUser`) returns **abbreviated**
-`subject` and `description` values for some cases — the trailing `...` comes from
-Walmart, not from this tool — and it is the only read endpoint the portal exposes,
-so there is currently no way to fetch the untruncated text for those cases.
+`cases list` is backed by one action that returns every case at once, but it
+**abbreviates** `subject` and `description` — the trailing `...` comes from
+Walmart. `cases get` uses the detail action instead, which returns the full text
+plus status, priority, category and the submitted form fields.
+
+`cases replies` shows the case conversation, flattened from the HTML the portal
+stores, with each message attributed to `us` or `WALMART`:
+
+```bash
+walmart-case cases replies 10000001 --from-walmart --latest 1
+```
 
 ## How it works
 

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from datetime import date
 
 import httpx
+import pytest
 
-from mcp_walmart_support.aura import AuraSession
-from mcp_walmart_support.cases import Case, fetch_cases, filter_cases, find_case
+from mcp_walmart_support.aura import AuraError, AuraSession
+from mcp_walmart_support.cases import (
+    Case,
+    fetch_case_detail,
+    fetch_cases,
+    filter_cases,
+    find_case,
+    html_to_text,
+)
 
 from .conftest import make_page
 
@@ -100,3 +109,93 @@ def test_find_case_by_number() -> None:
 def test_created_day_parses_zulu_timestamps() -> None:
     assert Case.from_record(RECORDS[0]).created_day == date(2026, 8, 19)
     assert Case.from_record({"caseNumber": "x", "createdDate": "nonsense"}).created_day is None
+
+
+# --- detail + conversation -------------------------------------------------
+
+DETAIL = {
+    "detail": {
+        "Id": "5004M00000EXAMPLE",
+        "CaseNumber": "10000001",
+        "CreatedDate": "2026-08-19T08:27:51.000Z",
+        "Subject": "Display API: audience set to ARCHIVED while still referenced",
+        "Description": "Environment: Production, US",
+        "Status": "Needs Info - Internal",
+        "Priority": "Medium",
+        "Issue_Category__c": "API-AdCases",
+        "Sub_Category_1__c": "Endpoint-specific problem",
+        "CommunityCaseLink__c": "https://portal.test/s/cases?casenumber=10000001",
+        "Sponsored_Ad_Contact_Name__c": "Ada Advertiser",
+        "Sponsored_Ad_Contact_Email__c": "you@example.com",
+    },
+    "addnlFlds": [{"fieldLabel": "Contact Name", "fieldValue": "Ada Advertiser"}],
+    "attachmentNumber": 2,
+    "comments": [
+        {
+            "createdDate": "2026-08-19T14:07:21.000Z",
+            "name": "Advertiser Help",
+            "isAdvertiser": False,
+            "textbody": "<html><div>We&#39;re looking into this.</div><div>&nbsp;</div></html>",
+        },
+        {
+            "createdDate": "2026-08-19T08:27:51.000Z",
+            "name": "Ada Advertiser",
+            "isAdvertiser": True,
+            "textbody": "Original report",
+        },
+    ],
+    "followers": [],
+}
+
+
+def _detail_session(payload: object) -> AuraSession:
+    page = make_page(authenticated=True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "aura" not in request.url.path:
+            return httpx.Response(200, text=page)
+        fields = urllib.parse.parse_qs(request.content.decode())
+        action = json.loads(fields["message"][0])["actions"][0]
+        # the portal really spells this parameter all lowercase
+        assert action["params"] == {"casenumber": "10000001"}
+        assert action["descriptor"] == "apex://AC_CaseDetailController/ACTION$getCaseData"
+        return httpx.Response(
+            200,
+            text=json.dumps(
+                {"actions": [{"id": "1;a", "state": "SUCCESS", "returnValue": payload}]}
+            ),
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
+    return AuraSession.bootstrap(client, "/s/activity")
+
+
+def test_detail_returns_untruncated_text_and_metadata() -> None:
+    detail = fetch_case_detail(_detail_session(DETAIL), "10000001")
+    assert detail.subject.endswith("still referenced")
+    assert detail.status == "Needs Info - Internal"
+    assert detail.priority == "Medium"
+    assert detail.attachments == 2
+    assert detail.additional_fields == {"Contact Name": "Ada Advertiser"}
+
+
+def test_comments_are_oldest_first_and_attributed() -> None:
+    detail = fetch_case_detail(_detail_session(DETAIL), "10000001")
+    assert [c.who for c in detail.comments] == ["us", "walmart"]
+    assert detail.comments[0].author == "Ada Advertiser"
+
+
+def test_comment_html_is_flattened() -> None:
+    detail = fetch_case_detail(_detail_session(DETAIL), "10000001")
+    walmart = detail.comments[-1]
+    # tags stripped, entities decoded, &nbsp; padding collapsed
+    assert walmart.body == "We're looking into this."
+
+
+def test_missing_case_raises() -> None:
+    with pytest.raises(AuraError, match="not found"):
+        fetch_case_detail(_detail_session({"detail": {}, "comments": []}), "10000001")
+
+
+def test_html_to_text_keeps_paragraph_breaks() -> None:
+    assert html_to_text("<div>one</div><br><div>two</div>") == "one\n\ntwo"

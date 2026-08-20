@@ -28,7 +28,13 @@ from .auth import (
     save_session,
     with_session,
 )
-from .cases import ACTIVITY_PAGE, Case, fetch_cases, filter_cases, find_case
+from .cases import (
+    ACTIVITY_PAGE,
+    Case,
+    fetch_case_detail,
+    fetch_cases,
+    filter_cases,
+)
 from .config import CONFIG_PATH, Config, load_config
 from .create import (
     CONTACT_PAGE,
@@ -115,19 +121,45 @@ def _cmd_cases_list(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def _cmd_cases_get(cfg: Config, args: argparse.Namespace) -> int:
-    case = find_case(with_session(cfg, ACTIVITY_PAGE, fetch_cases), args.case_number)
-    if case is None:
-        print(f"case {args.case_number} not found", file=sys.stderr)
-        return 1
+    detail = with_session(cfg, ACTIVITY_PAGE, lambda s: fetch_case_detail(s, args.case_number))
     if args.json:
-        print(json.dumps(case.as_dict(), indent=2))
-    else:
-        payload = case.as_dict()
-        description = str(payload.pop("description", ""))
-        _print_fields(payload)
-        if description:
-            print("\ndescription\n")
-            print(description)
+        print(json.dumps(detail.as_dict(), indent=2))
+        return 0
+
+    payload = detail.as_dict()
+    description = str(payload.pop("description", ""))
+    payload.pop("comments", None)
+    extras = payload.pop("additional_fields", {}) or {}
+    _print_fields({**payload, **{f"field: {k}": v for k, v in extras.items()}})
+    if description:
+        print("\ndescription\n")
+        print(description)
+    if detail.comments:
+        print(f"\n{len(detail.comments)} reply/replies — see: cases replies {detail.case_number}")
+    return 0
+
+
+def _cmd_cases_replies(cfg: Config, args: argparse.Namespace) -> int:
+    detail = with_session(cfg, ACTIVITY_PAGE, lambda s: fetch_case_detail(s, args.case_number))
+    comments = detail.comments
+    if args.from_walmart:
+        comments = [c for c in comments if not c.from_advertiser]
+    if args.latest:
+        comments = comments[-args.latest :]
+
+    if args.json:
+        print(json.dumps([c.as_dict() for c in comments], indent=2))
+        return 0
+
+    if not comments:
+        print("no replies on this case")
+        return 0
+    print(f"case {detail.case_number} — {detail.status}\n")
+    for comment in comments:
+        marker = "us" if comment.from_advertiser else "WALMART"
+        print(f"--- [{comment.created_date[:19]}] {marker} · {comment.author}")
+        print(comment.body or "(empty)")
+        print()
     return 0
 
 
@@ -240,8 +272,13 @@ def _build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--query", help="substring match on subject or description")
     listing.add_argument("--limit", type=int, default=0, help="show at most N cases")
 
-    detail = cases.add_parser("get", help="show one case")
+    detail = cases.add_parser("get", help="show one case in full")
     detail.add_argument("case_number")
+
+    replies = cases.add_parser("replies", help="show a case's conversation")
+    replies.add_argument("case_number")
+    replies.add_argument("--from-walmart", action="store_true", help="only messages from support")
+    replies.add_argument("--latest", type=int, default=0, help="show only the last N messages")
 
     categories = sub.add_parser(
         "categories", help="list the portal's support categories"
@@ -300,6 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("auth", "logout"): _cmd_auth_logout,
         ("cases", "list"): _cmd_cases_list,
         ("cases", "get"): _cmd_cases_get,
+        ("cases", "replies"): _cmd_cases_replies,
         ("case", "create"): _cmd_case_create,
         ("categories", "list"): _cmd_categories_list,
     }

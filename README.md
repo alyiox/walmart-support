@@ -1,6 +1,7 @@
 # Walmart Connect Advertising Support Cases
 
 [![CI](https://github.com/alyiox/walmart-support/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alyiox/walmart-support/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/walmart-support.svg)](https://pypi.org/project/walmart-support/)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 

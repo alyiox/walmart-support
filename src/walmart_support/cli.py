@@ -325,17 +325,17 @@ def _describe_payload(payload: object) -> str:
 
 
 _EXAMPLES = """examples:
-  walmart-case auth check                     confirm the portal session
-  walmart-case cases list --status "need info"    cases awaiting a response
-  walmart-case cases list --since 30d --limit 10
-  walmart-case cases get 10000001             one case, full text
-  walmart-case cases replies 10000001 --from-walmart --latest 1
-  walmart-case cases list --query "adGroups/list" --since 30d --deep
-  walmart-case cases reply 10000001 --message-file answer.txt
-  walmart-case cases attach 10000001 ./har.json
-  walmart-case cases create --subject ... --description-file body.txt
-                                              prints the payload; add --submit to file
-  walmart-case categories list --platform sponsored-search
+  walmart-support auth check                        confirm the portal session
+  walmart-support cases list --status "need info"   cases awaiting a response
+  walmart-support cases list --since 30d --limit 10
+  walmart-support cases get 10000001                one case, full text
+  walmart-support cases replies 10000001 --from-walmart --latest 1
+  walmart-support cases list --query "adGroups/list" --since 30d --deep
+  walmart-support cases reply 10000001 --message-file answer.txt
+  walmart-support cases attach 10000001 ./har.json
+  walmart-support cases create --subject ... --description-file body.txt
+                                                    prints the payload; add --submit to file
+  walmart-support categories list --platform sponsored-search
 
 notes:
   every command takes --json for machine-readable output
@@ -345,7 +345,7 @@ notes:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="walmart-case",
+        prog="walmart-support",
         description="Read and file Walmart Connect advertising support cases.",
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,

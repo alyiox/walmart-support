@@ -38,7 +38,7 @@ _AURA_CONFIG = re.compile(r"auraConfig\s*=\s*\{")
 # them. The file holds live session cookies, so it is written 0600.
 SESSION_PATH = (
     Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    / "mcp-walmart-support"
+    / "walmart-support"
     / "session.json"
 )
 

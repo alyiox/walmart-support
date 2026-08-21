@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 import pytest
 
-from mcp_walmart_support.aura import AuraError, AuraSession
-from mcp_walmart_support.cases import (
+from walmart_support.aura import AuraError, AuraSession
+from walmart_support.cases import (
     Case,
     TooManyCandidates,
     close_case,

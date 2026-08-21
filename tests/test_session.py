@@ -7,9 +7,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from mcp_walmart_support import auth
-from mcp_walmart_support.aura import AuraSession, SessionExpired
-from mcp_walmart_support.config import Config
+from walmart_support import auth
+from walmart_support.aura import AuraSession, SessionExpired
+from walmart_support.config import Config
 
 from .conftest import make_login_form, make_page
 

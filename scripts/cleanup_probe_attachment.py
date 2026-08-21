@@ -11,10 +11,10 @@ Run with:  uv run python scripts/cleanup_probe_attachment.py
 
 from __future__ import annotations
 
-from mcp_walmart_support.attachments import document_ids
-from mcp_walmart_support.aura import AuraError, AuraSession
-from mcp_walmart_support.auth import with_session
-from mcp_walmart_support.config import load_config
+from walmart_support.attachments import document_ids
+from walmart_support.aura import AuraError, AuraSession
+from walmart_support.auth import with_session
+from walmart_support.config import load_config
 
 CASE = "10000002"
 CASE_PAGE = f"/s/cases?casenumber={CASE}&language=en_US"

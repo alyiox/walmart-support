@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from mcp_walmart_support.aura import SessionExpired
-from mcp_walmart_support.auth import build_client, check_auth, login, read_auth_state
-from mcp_walmart_support.config import Config
+from walmart_support.aura import SessionExpired
+from walmart_support.auth import build_client, check_auth, login, read_auth_state
+from walmart_support.config import Config
 
 
 def _cfg(**kw: object) -> Config:
@@ -57,7 +57,7 @@ def test_login_without_credentials_raises_session_expired(guest_page: str) -> No
 
 
 def test_login_form_fields_are_copied_from_the_page() -> None:
-    from mcp_walmart_support.auth import _login_form_fields
+    from walmart_support.auth import _login_form_fields
 
     html = (
         '<form name="login" method="post" action="/login">'
@@ -76,7 +76,7 @@ def test_login_form_fields_are_copied_from_the_page() -> None:
 
 
 def test_login_form_missing_raises() -> None:
-    from mcp_walmart_support.auth import _login_form_fields
+    from walmart_support.auth import _login_form_fields
 
     with pytest.raises(SessionExpired, match="could not find the login form"):
         _login_form_fields("<html>no form here</html>")

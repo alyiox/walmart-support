@@ -5,8 +5,8 @@ import json
 import httpx
 import pytest
 
-from mcp_walmart_support.aura import AuraError, AuraSession
-from mcp_walmart_support.create import (
+from walmart_support.aura import AuraError, AuraSession
+from walmart_support.create import (
     CaseDraft,
     Identity,
     build_payload,

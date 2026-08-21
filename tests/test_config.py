@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_walmart_support.config import DEFAULT_BASE_URL, load_config
+from walmart_support.config import DEFAULT_BASE_URL, load_config
 
 
 def _write(tmp_path: Path, data: dict[str, object]) -> Path:

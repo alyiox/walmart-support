@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".config" / "mcp-walmart-support" / "config.json"
+CONFIG_PATH = Path.home() / ".config" / "walmart-support" / "config.json"
 
 DEFAULT_BASE_URL = "https://advertisinghelp.walmart.com"
 DEFAULT_TIMEOUT = 60

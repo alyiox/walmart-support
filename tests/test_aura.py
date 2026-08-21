@@ -6,7 +6,7 @@ import urllib.parse
 import httpx
 import pytest
 
-from mcp_walmart_support.aura import (
+from walmart_support.aura import (
     AuraContext,
     AuraError,
     AuraSession,

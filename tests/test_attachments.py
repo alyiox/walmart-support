@@ -9,14 +9,14 @@ from typing import Any
 import httpx
 import pytest
 
-from mcp_walmart_support.attachments import (
+from walmart_support.attachments import (
     CHUNK_CHARS,
     chunk,
     content_type_for,
     document_ids,
     upload_file,
 )
-from mcp_walmart_support.aura import AuraError, AuraSession
+from walmart_support.aura import AuraError, AuraSession
 
 from .conftest import make_page
 

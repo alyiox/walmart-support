@@ -1,10 +1,8 @@
 # Walmart Connect Advertising Support Cases
 
-[![CI](https://github.com/alyiox/mcp-walmart-support/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alyiox/mcp-walmart-support/actions/workflows/ci.yml)
+[![CI](https://github.com/alyiox/walmart-support/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alyiox/walmart-support/actions/workflows/ci.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-<!-- mcp-name: io.github.alyiox/mcp-walmart-support -->
 
 CLI for reading and filing [Walmart Connect](https://advertisinghelp.walmart.com) advertising
 support cases without driving a browser.
@@ -27,24 +25,24 @@ captured from the portal UI.
 ## Quick start
 
 ```bash
-mkdir -p ~/.config/mcp-walmart-support
-cp config.example.json ~/.config/mcp-walmart-support/config.json
-$EDITOR ~/.config/mcp-walmart-support/config.json
+mkdir -p ~/.config/walmart-support
+cp config.example.json ~/.config/walmart-support/config.json
+$EDITOR ~/.config/walmart-support/config.json
 
-uv run walmart-case auth check
-uv run walmart-case cases list --status "need info"
-uv run walmart-case cases get 15957474
-uv run walmart-case cases replies 15957474 --from-walmart
+uv run walmart-support auth check
+uv run walmart-support cases list --status "need info"
+uv run walmart-support cases get 15957474
+uv run walmart-support cases replies 15957474 --from-walmart
 
-uv run walmart-case cases create \
+uv run walmart-support cases create \
   --platform display \
   --category "API Support" --issue "Endpoint-specific problem" \
   --subject "Display API: ..." --advertisers "241727, 244985" \
-  --description-file ./body.txt          # prints the payload
-uv run walmart-case cases create ... --submit   # actually files it
+  --description-file ./body.txt                    # prints the payload
+uv run walmart-support cases create ... --submit   # actually files it
 
 # where the --category and --issue names come from
-uv run walmart-case categories list --platform sponsored-search
+uv run walmart-support categories list --platform sponsored-search
 ```
 
 ## Replying and attaching
@@ -53,8 +51,8 @@ uv run walmart-case categories list --platform sponsored-search
 files to one:
 
 ```bash
-walmart-case cases reply 15957474 --message-file answer.txt
-walmart-case cases attach 15957474 ./har.json ./adgroup.json
+walmart-support cases reply 15957474 --message-file answer.txt
+walmart-support cases attach 15957474 ./har.json ./adgroup.json
 ```
 
 Neither is gated behind a confirmation flag, unlike `cases create`: they act on
@@ -117,25 +115,25 @@ of which the method signature revealed:
 ### Closing and replying
 
 ```bash
-walmart-case cases reply 15971149 --message-file answer.txt
-walmart-case cases close 15971149      # New -> Closed
+walmart-support cases reply 15971149 --message-file answer.txt
+walmart-support cases close 15971149   # New -> Closed
 ```
 
 ## Sessions
 
 Each invocation is its own process, so session cookies are cached in
-`$XDG_CACHE_HOME/mcp-walmart-support/session.json` (mode `0600`) and reused
+`$XDG_CACHE_HOME/walmart-support/session.json` (mode `0600`) and reused
 until the portal rejects them. Without that, every command would pay a full
 login — four requests and a Salesforce login event before doing any work; with
 it, a warm command is roughly twice as fast and logs in only when it must.
 
 A session that dies mid-command is retried once from a clean login, because
 Salesforce reports an invalid session in the middle of a request rather than up
-front. `walmart-case auth logout` discards the cached session.
+front. `walmart-support auth logout` discards the cached session.
 
 ## Configuration
 
-`~/.config/mcp-walmart-support/config.json`:
+`~/.config/walmart-support/config.json`:
 
 | Key | Required | Description |
 | --- | --- | --- |
@@ -172,10 +170,10 @@ request per candidate:
 
 ```bash
 # finds nothing: the term sits past where the list truncates the subject
-walmart-case cases list --query "targeting of a LIVE ad group"
+walmart-support cases list --query "targeting of a LIVE ad group"
 
 # finds both cases
-walmart-case cases list --query "targeting of a LIVE ad group" --since 2026-08-01 --deep
+walmart-support cases list --query "targeting of a LIVE ad group" --since 2026-08-01 --deep
 ```
 
 Because it fans out, `--deep` refuses to run on more candidates than its cap
@@ -190,9 +188,9 @@ filtering and return matches from an arbitrary slice.
 stores, with each message attributed to `us` or `WALMART`:
 
 ```bash
-walmart-case cases replies 15957474                      # whole thread
-walmart-case cases replies 15957474 --from-walmart        # skip our own posts
-walmart-case cases replies 15957474 --latest 1            # just the newest
+walmart-support cases replies 15957474                  # whole thread
+walmart-support cases replies 15957474 --from-walmart   # skip our own posts
+walmart-support cases replies 15957474 --latest 1       # just the newest
 ```
 
 Support's acknowledgement mails quote the entire case body back, and later

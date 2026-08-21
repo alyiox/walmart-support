@@ -96,18 +96,17 @@ Assisted-by: Claude:claude-opus-4-6 coccinelle sparse
 
 ---
 
-## MCP Metadata
+## CLI conventions
 
-Normative, high-density metadata: enough for correct tool and parameter selection, minimal to reduce token cost.
+The command surface is the product. Keep it predictable.
 
-* **The tool/parameter description MUST start with [WalmartSupport], followed by a Verb-Object fragment**, e.g. `[WalmartSupport] List support cases`, `[WalmartSupport] Get one support case`, `[WalmartSupport] Check portal authentication`.
-* **Use tag-based lineage (Src: <Entity>) for parameters that refer to Walmart Support MCP entities** (e.g. case number → Src: cases, status → Src: picklists).
-* **Every tool MUST declare `ToolAnnotations`**, mapped from the operation it performs:
-  * Read → `read_only_hint=True`
-  * Create → `read_only_hint=False`, `destructive_hint=False`, `idempotent_hint=False`
-  * Update → `read_only_hint=False`, `destructive_hint=False`, `idempotent_hint=True`
-  * Delete → `read_only_hint=False`, `destructive_hint=True`
-  * A passthrough tool that can perform any of the above takes the most cautious shape (`destructive_hint=True`, `idempotent_hint=False`)
-  * Set `open_world_hint=True` when the tool reaches the network, `False` when it only reads bundled specs or config
-  * Omit `destructive_hint`/`idempotent_hint` on read-only tools — they are meaningful only when `read_only_hint=False`
-
+* Group commands by the noun they act on (`cases`, `categories`, `auth`); the
+  group name carries the entity, the subcommand carries the verb
+* Every command MUST accept `--json` and emit machine-readable output under it,
+  with the human rendering as the default
+* Take prose (case bodies, replies) through a `--*-file` flag rather than an
+  argument, so long text never passes through shell quoting
+* A command that changes state at Walmart's end MUST NOT act on defaults alone:
+  `cases create` prints its payload unless `--submit` is given
+* Exit codes: `0` success, `1` portal or network failure, `2` usage, config, or
+  refused input

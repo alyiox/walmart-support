@@ -28,7 +28,9 @@ The body is optional for trivial changes.
 
 ## Release tags
 
-* Use the bare version as the tag name — **no `v` prefix** (e.g. `0.1.0a4`, not `v0.1.0a4``)
+* Use the bare version as the tag name — **no `v` prefix** (e.g. `0.1.1`, not `v0.1.1`)
+* Prefer final versions over pre-releases: a resolver skips pre-releases unless
+  asked, so `uvx walmart-support` cannot see an `a`/`b`/`rc` build
 * Tags must be annotated (`git tag -a`) with a structured release-notes message
 
 ---

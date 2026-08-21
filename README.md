@@ -14,36 +14,44 @@ in some environments, unreliable enough to leave you unsure whether a case was a
 
 ## Status
 
-Early. `auth check` works; case read and create commands are landing as their Aura payloads are
-captured from the portal UI.
+Working end to end: authentication, listing and reading cases, replying, attaching files, closing,
+and filing new cases. Each Aura payload was captured from the portal UI and verified against a real
+case, so treat behaviour outside the documented commands as unmapped rather than unsupported.
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.13+, or [uv](https://docs.astral.sh/uv/)
 - A Walmart Advertising Help portal account (the Partners → Help Site login)
 
 ## Quick start
+
+There is nothing to install — `uvx` fetches and runs it:
 
 ```bash
 mkdir -p ~/.config/walmart-support
 cp config.example.json ~/.config/walmart-support/config.json
 $EDITOR ~/.config/walmart-support/config.json
 
-uv run walmart-support auth check
-uv run walmart-support cases list --status "need info"
-uv run walmart-support cases get 10000001
-uv run walmart-support cases replies 10000001 --from-walmart
+uvx walmart-support auth check
+uvx walmart-support cases list --status "need info"
+uvx walmart-support cases get 10000001
+uvx walmart-support cases replies 10000001 --from-walmart
 
-uv run walmart-support cases create \
+uvx walmart-support cases create \
   --platform display \
   --category "API Support" --issue "Endpoint-specific problem" \
   --subject "Display API: ..." --advertisers "111111, 222222" \
-  --description-file ./body.txt                    # prints the payload
-uv run walmart-support cases create ... --submit   # actually files it
+  --description-file ./body.txt                # prints the payload
+uvx walmart-support cases create ... --submit   # actually files it
 
 # where the --category and --issue names come from
-uv run walmart-support categories list --platform sponsored-search
+uvx walmart-support categories list --platform sponsored-search
 ```
+
+Reaching for it daily, or working offline? `uv tool install walmart-support`
+puts it on `PATH` and starts faster; `walmart-support --version` reports which
+build you are on either way. Inside a clone of this repo, use `uv run
+walmart-support ...` to exercise your working tree.
 
 ## Replying and attaching
 

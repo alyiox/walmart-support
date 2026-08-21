@@ -112,3 +112,6 @@ The command surface is the product. Keep it predictable.
   `cases create` prints its payload unless `--submit` is given
 * Exit codes: `0` success, `1` portal or network failure, `2` usage, config, or
   refused input
+* A change to a flag's behaviour or cost updates `skills/walmart-support/SKILL.md`
+  in the same commit: the skill documents the gates and per-case request costs
+  that the help text does not

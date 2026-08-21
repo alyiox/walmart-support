@@ -13,6 +13,7 @@ import os
 import sys
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import httpx
@@ -52,6 +53,18 @@ from .create import (
     resolve_platform,
     submit,
 )
+
+
+def _version() -> str:
+    """Report the installed version.
+
+    Read from package metadata rather than a constant, so a ``uvx`` run
+    reports the build it actually resolved.
+    """
+    try:
+        return version("walmart-support")
+    except PackageNotFoundError:  # pragma: no cover - running from a source tree
+        return "unknown"
 
 
 def _print_fields(payload: dict[str, object]) -> None:
@@ -349,6 +362,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Read and file Walmart Connect advertising support cases.",
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"walmart-support {_version()}",
+        help="report the installed version",
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--config", default=None, help=f"config file (default: {CONFIG_PATH})")

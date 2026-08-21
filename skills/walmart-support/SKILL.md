@@ -15,8 +15,10 @@ Run `walmart-support --version`. If the command is missing, `uvx walmart-support
 command below without installing anything.
 
 Credentials live in `~/.config/walmart-support/config.json`, or `WALMART_SUPPORT_USERNAME` /
-`WALMART_SUPPORT_PASSWORD`. `walmart-support auth check` confirms the session; it exits 1 when it
-cannot log in, which is a credential or portal problem — do not retry it in a loop.
+`WALMART_SUPPORT_PASSWORD`. Every command logs in on its own and caches the session, so there is
+nothing to run first. When a command exits 1 with `portal error:`, `walmart-support auth check`
+tells you whether the credentials or the portal is at fault — it is a diagnostic, not a
+prerequisite, and retrying it in a loop will not fix a rejected login.
 
 ## `--json` is global, so it goes first
 

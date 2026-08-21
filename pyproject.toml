@@ -5,7 +5,6 @@ description = "CLI for Walmart Connect advertising support cases"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "mcp[cli]>=2.0.0",
     "httpx>=0.27.0",
 ]
 

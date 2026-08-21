@@ -205,6 +205,21 @@ Support's acknowledgement mails quote the entire case body back, and later
 replies quote the ones before them, so an unfiltered thread is mostly repetition
 of what you already sent — `--from-walmart --latest 1` is usually what you want.
 
+## Claude Code plugin
+
+The repo doubles as a [Claude Code](https://claude.com/claude-code) plugin, so the workflow
+knowledge travels with the CLI instead of living in one person's `~/.claude`:
+
+```
+/plugin marketplace add alyiox/walmart-support
+/plugin install walmart-support@walmart-support
+```
+
+That installs a skill covering the parts the `--help` output cannot express — that `--deep` costs
+one request per case, that support's replies quote the whole thread back, that `cases create` files
+nothing without `--submit`, and that `cases close` is one-way. The plugin does not install the CLI;
+`walmart-support --version` tells you whether you still need to.
+
 ## How it works
 
 ```

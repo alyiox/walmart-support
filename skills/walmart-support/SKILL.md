@@ -11,12 +11,8 @@ carry the full flag list; this file covers only what the help text cannot tell y
 
 ## Before anything
 
-Run `walmart-support --version`. If the command is missing, `uvx walmart-support ...` runs it
-without installing once it is published; until then install from the repo:
-
-```bash
-uv tool install git+ssh://git@github.com/alyiox/walmart-support
-```
+Run `walmart-support --version`. If the command is missing, `uvx walmart-support ...` runs every
+command below without installing anything.
 
 Credentials live in `~/.config/walmart-support/config.json`, or `WALMART_SUPPORT_USERNAME` /
 `WALMART_SUPPORT_PASSWORD`. `walmart-support auth check` confirms the session; it exits 1 when it

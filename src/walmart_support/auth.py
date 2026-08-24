@@ -183,6 +183,12 @@ def login(client: httpx.Client, cfg: Config, page: str = BOOTSTRAP_PAGE) -> Auth
             "login",
             "no username/password configured, so the session cannot be renewed",
         )
+    # A rejected session has to be dropped before the form is fetched: with a
+    # stale sid still attached the portal replays that same unauthenticated
+    # session through frontdoor.jsp instead of minting a new one, so an expired
+    # cache could never renew itself and every command failed until the cache
+    # was deleted by hand.
+    client.cookies.clear()
     form_page = client.get(LOGIN_PAGE, params={"startURL": page})
     form_page.raise_for_status()
 

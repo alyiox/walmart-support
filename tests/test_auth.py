@@ -7,6 +7,8 @@ from walmart_support.aura import SessionExpired
 from walmart_support.auth import build_client, check_auth, login, read_auth_state
 from walmart_support.config import Config
 
+from .conftest import make_login_form
+
 
 def _cfg(**kw: object) -> Config:
     base = {
@@ -80,3 +82,23 @@ def test_login_form_missing_raises() -> None:
 
     with pytest.raises(SessionExpired, match="could not find the login form"):
         _login_form_fields("<html>no form here</html>")
+
+
+def test_login_drops_a_rejected_session_before_authenticating(member_page: str) -> None:
+    # The portal replays a stale sid through frontdoor.jsp instead of minting a
+    # new session, so an expired cache could never renew itself.
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("cookie"))
+        if request.url.path == "/login" and request.method == "GET":
+            return httpx.Response(200, text=make_login_form())
+        return httpx.Response(200, text=member_page)
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url="https://portal.test",
+        cookies={"sid": "expired"},
+    )
+    assert login(client, _cfg(username="u@example.com", password="pw")).authenticated is True
+    assert seen and not any(c and "expired" in c for c in seen)

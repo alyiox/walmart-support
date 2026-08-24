@@ -19,9 +19,10 @@ from pathlib import Path
 import httpx
 
 from .attachments import Upload, upload_file
-from .aura import AuraError, AuraSession
+from .aura import AuraError, AuraSession, SessionExpired
 from .auth import (
     SESSION_PATH,
+    AuthState,
     build_client,
     check_auth,
     clear_session,
@@ -100,18 +101,27 @@ def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
         state = check_auth(client)
         source = "cache" if cached else "none"
         if not state.authenticated and cfg.has_credentials:
-            state = login(client, cfg)
             source = "login"
+            try:
+                state = login(client, cfg)
+            except SessionExpired as exc:
+                # This is the command that diagnoses a broken login, so report
+                # why it broke instead of failing like any other command.
+                state = AuthState(authenticated=False, error=str(exc))
             if state.authenticated:
                 save_session(client)
-        payload = {
+        payload: dict[str, object] = {
             "authenticated": state.authenticated,
             "auth_source": source,
             "username": cfg.username or "(not configured)",
             "base_url": cfg.base_url,
             "session_cache": str(SESSION_PATH),
+            "error": state.error,
         }
-        print(json.dumps(payload, indent=2)) if args.json else _print_fields(payload)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_fields({k: v for k, v in payload.items() if k != "error" or v})
         return 0 if state.authenticated else 1
     finally:
         client.close()

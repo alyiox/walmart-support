@@ -11,6 +11,7 @@ pay a full login.
 
 from __future__ import annotations
 
+import html as html_module
 import json
 import os
 import re
@@ -52,12 +53,22 @@ _LOGIN_FORM = re.compile(r'<form name="login".*?</form>', re.DOTALL)
 _INPUT = re.compile(r"<input[^>]*>")
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
 
+# A rejected login is answered with the form again rather than a redirect, and
+# the reason sits in a ``loginError`` div. The page ships more than one — the
+# username chooser has its own, empty and hidden — so every match is read and
+# the first one carrying text wins.
+_LOGIN_ERROR = re.compile(r'<div[^>]*class="[^"]*loginError[^"]*"[^>]*>(.*?)</div>', re.DOTALL)
+_TAG = re.compile(r"<[^>]+>")
+
 
 @dataclass(frozen=True)
 class AuthState:
     authenticated: bool
     language: str | None = None
     page_id: str | None = None
+    # What the portal said when it refused the login, so a caller can report
+    # the reason instead of a bare "not authenticated".
+    error: str | None = None
 
 
 def load_session(path: Path | None = None) -> dict[str, str]:
@@ -176,6 +187,16 @@ def _login_form_fields(html: str) -> dict[str, str]:
     return fields
 
 
+def read_login_error(html: str) -> str | None:
+    """Return the portal's stated reason for refusing a login, if it gave one."""
+    for match in _LOGIN_ERROR.finditer(html):
+        text = html_module.unescape(_TAG.sub("", match.group(1)))
+        collapsed = " ".join(text.split())
+        if collapsed:
+            return collapsed
+    return None
+
+
 def login(client: httpx.Client, cfg: Config, page: str = BOOTSTRAP_PAGE) -> AuthState:
     """Authenticate with username and password through the classic login form."""
     if not cfg.has_credentials:
@@ -201,9 +222,15 @@ def login(client: httpx.Client, cfg: Config, page: str = BOOTSTRAP_PAGE) -> Auth
         "startURL": page,
         "Login": "Log In",
     }
-    # The response redirects through frontdoor.jsp, which sets the session
-    # cookies; httpx follows it because the client allows redirects.
-    client.post(LOGIN_PAGE, data=fields).raise_for_status()
+    # A successful login redirects through frontdoor.jsp, which sets the session
+    # cookies; httpx follows it because the client allows redirects. A refused
+    # one answers 200 with the form again and the reason in it, so read that
+    # rather than paying for a bootstrap page that can only say "not logged in".
+    response = client.post(LOGIN_PAGE, data=fields)
+    response.raise_for_status()
+    error = read_login_error(response.text)
+    if error:
+        return AuthState(authenticated=False, error=error)
     return check_auth(client, page)
 
 
@@ -228,7 +255,9 @@ def open_session(
         source = "login"
         if not state.authenticated:
             client.close()
-            raise SessionExpired("login", "portal still reports an unauthenticated session")
+            raise SessionExpired(
+                "login", state.error or "portal still reports an unauthenticated session"
+            )
 
     if source == "login":
         save_session(client)

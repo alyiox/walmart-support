@@ -102,3 +102,33 @@ def test_login_drops_a_rejected_session_before_authenticating(member_page: str) 
     )
     assert login(client, _cfg(username="u@example.com", password="pw")).authenticated is True
     assert seen and not any(c and "expired" in c for c in seen)
+
+
+def test_reads_the_reason_a_login_was_refused() -> None:
+    from walmart_support.auth import read_login_error
+
+    html = (
+        '<div class="loginError" id="chooser_error" style="display:none;"></div>'
+        '<div class="loginError" id="error">Please check your username and password. '
+        "If you still can&#39;t log in, contact your administrator.</div>"
+    )
+    # the empty chooser error is skipped, and entities are decoded
+    assert read_login_error(html) == (
+        "Please check your username and password. If you still can't log in, "
+        "contact your administrator."
+    )
+    assert read_login_error(make_login_form()) is None
+
+
+def test_refused_login_reports_the_portals_message(guest_page: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, text=make_login_form())
+        return httpx.Response(
+            200, text='<div class="loginError" id="error">Your account is locked.</div>'
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
+    state = login(client, _cfg(username="u@example.com", password="pw"))
+    assert state.authenticated is False
+    assert state.error == "Your account is locked."

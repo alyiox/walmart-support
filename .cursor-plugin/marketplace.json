@@ -1,0 +1,21 @@
+{
+  "name": "walmart-support",
+  "owner": {
+    "name": "alyiox"
+  },
+  "metadata": {
+    "description": "The walmart-support CLI and the skill that drives it."
+  },
+  "plugins": [
+    {
+      "name": "walmart-support",
+      "source": "./",
+      "description": "Read, answer, and file Walmart Connect advertising support cases from the shell.",
+      "version": "0.1.1",
+      "category": "utilities",
+      "homepage": "https://github.com/alyiox/walmart-support",
+      "repository": "https://github.com/alyiox/walmart-support",
+      "license": "MIT"
+    }
+  ]
+}

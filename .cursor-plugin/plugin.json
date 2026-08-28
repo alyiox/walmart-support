@@ -1,0 +1,19 @@
+{
+  "name": "walmart-support",
+  "version": "0.1.1",
+  "description": "Read, answer, and file Walmart Connect advertising support cases from the shell, using the walmart-support CLI.",
+  "author": {
+    "name": "alyiox"
+  },
+  "homepage": "https://github.com/alyiox/walmart-support",
+  "repository": "https://github.com/alyiox/walmart-support",
+  "license": "MIT",
+  "keywords": [
+    "walmart",
+    "walmart-connect",
+    "advertising",
+    "support",
+    "cases",
+    "cli"
+  ]
+}

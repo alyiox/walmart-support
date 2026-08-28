@@ -206,17 +206,31 @@ Support's acknowledgement mails quote the entire case body back, and later
 replies quote the ones before them, so an unfiltered thread is mostly repetition
 of what you already sent — `--from-walmart --latest 1` is usually what you want.
 
-## Claude Code plugin
+## Agent plugins (Claude Code, Cursor, Codex)
 
-The repo doubles as a [Claude Code](https://claude.com/claude-code) plugin, so the workflow
-knowledge travels with the CLI instead of living in one person's `~/.claude`:
+The repo doubles as an [Agent Plugin](https://agent-plugins.org), so workflow knowledge travels
+with the CLI instead of living in one person's local config.
+
+### Claude Code
 
 ```
 /plugin marketplace add alyiox/walmart-support
 /plugin install walmart-support@walmart-support
 ```
 
-That installs a skill covering the parts the `--help` output cannot express — that `--deep` costs
+### Cursor
+
+Install via Cursor Plugins (`/add-plugin walmart-support` or from the Cursor Marketplace / `.cursor-plugin`).
+For local development, link this repo into `~/.cursor/plugins/local/walmart-support` or copy `.cursor/skills/`.
+
+### Other Agent Plugins / Codex
+
+Conforms to the **Agent Plugins 1.0** specification via the root `plugin.json` and `.codex-plugin/plugin.json`,
+making the `walmart-support` skill portable across ChatGPT/Codex, GitHub Copilot, and VS Code.
+
+---
+
+Installing the plugin installs a skill covering what `--help` cannot express — that `--deep` costs
 one request per case, that support's replies quote the whole thread back, that `cases create` files
 nothing without `--submit`, and that `cases close` is one-way. The plugin does not install the CLI;
 `walmart-support --version` tells you whether you still need to.

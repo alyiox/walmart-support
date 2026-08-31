@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "walmart-support",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Read, answer, and file Walmart Connect advertising support cases from the shell, using the walmart-support CLI.",
   "author": {
     "name": "alyiox"

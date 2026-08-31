@@ -235,6 +235,11 @@ one request per case, that support's replies quote the whole thread back, that `
 nothing without `--submit`, and that `cases close` is one-way. The plugin does not install the CLI;
 `walmart-support --version` tells you whether you still need to.
 
+The plugin and the CLI share one version and ship on one tag. A skill-only change is still a
+release, so some PyPI versions carry byte-identical code to the one before them — the number tracks
+the repo, not the Python package. That is deliberate: it keeps the guarantee worth having, which is
+that the skill you install always describes the CLI released alongside it.
+
 ## How it works
 
 ```

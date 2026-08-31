@@ -28,6 +28,20 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Version consistency
+        run: |
+          pkg=$(uv version --short)
+          for f in plugin.json .claude-plugin/plugin.json \
+                   .cursor-plugin/plugin.json .codex-plugin/plugin.json; do
+            v=$(jq -r .version "$f")
+            [ "$v" = "$pkg" ] || {
+              echo "::error file=$f::version $v does not match package $pkg"; exit 1; }
+          done
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "$pkg" ]; then
+            echo "::error::tag ${{ github.ref_name }} does not match package version $pkg"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: uv sync --group dev
 

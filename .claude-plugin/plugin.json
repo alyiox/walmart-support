@@ -1,7 +1,7 @@
 {
   "name": "walmart-support",
   "description": "Read, answer, and file Walmart Connect advertising support cases from the shell, using the walmart-support CLI.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "alyiox"
   },

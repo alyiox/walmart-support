@@ -10,6 +10,7 @@ import pytest
 
 from walmart_support.aura import AuraError, AuraSession
 from walmart_support.cases import (
+    COMMENT_MAX_CHARS,
     Case,
     TooManyCandidates,
     close_case,
@@ -21,6 +22,7 @@ from walmart_support.cases import (
     html_to_text,
     post_comment,
     pushdown_limit,
+    rendered_length,
 )
 
 from .conftest import make_page
@@ -271,6 +273,32 @@ def test_deep_filter_refuses_to_fan_out_past_the_cap() -> None:
     cases = [Case.from_record({"caseNumber": str(n)}) for n in range(30)]
     with pytest.raises(TooManyCandidates, match="cap of 25"):
         deep_filter(_detail_session({}), cases, "anything")
+
+
+def test_rendered_length_counts_plain_text_verbatim() -> None:
+    assert rendered_length("retested in prod") == len("retested in prod")
+
+
+def test_rendered_length_charges_eight_for_a_paragraph_break() -> None:
+    # The portal stores "<br><br>", not the two newlines we sent.
+    assert rendered_length("one\n\ntwo") - rendered_length("onetwo") == 8
+
+
+def test_rendered_length_charges_for_escaped_markup() -> None:
+    # A raw response body pasted into a reply is where this bites: every
+    # angle bracket and ampersand grows on the way into the portal.
+    assert rendered_length('<a href="x">&</a>') > len('<a href="x">&</a>')
+
+
+def test_rendered_length_can_exceed_the_cap_while_plain_length_does_not() -> None:
+    message = "\n\n".join(["x" * 40] * 90)
+    assert len(message) < COMMENT_MAX_CHARS < rendered_length(message)
+
+
+def test_rendered_length_leaves_a_body_at_the_cap_within_it() -> None:
+    # The boundary is inclusive: plain text that renders to exactly the cap
+    # still posts.
+    assert rendered_length("x" * COMMENT_MAX_CHARS) == COMMENT_MAX_CHARS
 
 
 def test_post_comment_sends_the_portal_shape() -> None:

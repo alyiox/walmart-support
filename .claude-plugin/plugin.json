@@ -1,7 +1,7 @@
 {
   "name": "walmart-support",
-  "description": "Read, answer, and file Walmart Connect advertising support cases from the shell, using the walmart-support CLI.",
-  "version": "0.1.3",
+  "description": "Read, answer, and file Walmart Connect and Sam's Club advertising support cases from the shell, using the walmart-support CLI.",
+  "version": "0.2.0",
   "author": {
     "name": "alyiox"
   },

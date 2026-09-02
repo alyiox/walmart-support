@@ -8,7 +8,7 @@
     {
       "name": "walmart-support",
       "source": "./",
-      "description": "Read, answer, and file Walmart Connect advertising support cases from the shell.",
+      "description": "Read, answer, and file Walmart Connect and Sam's Club advertising support cases from the shell.",
       "category": "productivity",
       "homepage": "https://github.com/alyiox/walmart-support"
     }

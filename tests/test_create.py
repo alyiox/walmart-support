@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -13,8 +14,8 @@ from walmart_support.create import (
     fetch_category_tree,
     prepare,
     resolve_categories,
-    resolve_platform,
 )
+from walmart_support.portals import SAMSCLUB, WALMART, PortalError
 
 from .conftest import make_page
 
@@ -29,6 +30,10 @@ AUTH = {
         "Account": {"Id": "0014M00000EXAMPLE", "Name": "Example Advertiser"},
     },
 }
+
+# Sam's Club populates its advertiser picker from this action rather than
+# carrying the account on the contact record.
+ADVERTISERS = [{"Id": "0018A00001EXAMPLE", "Name": "Example Agency"}]
 
 # Mirrors the live shape: the wizard record's own name is internal, and the
 # linked record carries the UI label plus the value written to the Case.
@@ -86,6 +91,8 @@ def _session(*, tree: dict[str, object] | None = None, auth: dict[str, object] |
         hint = str(request.url)
         if "getAuthenticationStatus" in hint:
             value: object = auth if auth is not None else AUTH
+        elif "getAdvertiserInfo" in hint:
+            value = ADVERTISERS
         elif "getCaseCategoriesNew" in hint:
             value = json.dumps(tree if tree is not None else TREE)
         else:
@@ -101,16 +108,19 @@ def _session(*, tree: dict[str, object] | None = None, auth: dict[str, object] |
 
 def test_platform_aliases_cover_sponsored_search() -> None:
     # The portal collapses Sponsored Search onto Sponsored Products.
-    assert resolve_platform("sponsored-search") == "Sponsored Products"
-    assert resolve_platform("Sponsored Search") == "Sponsored Products"
-    assert resolve_platform("search") == "Sponsored Products"
-    assert resolve_platform("display") == "Display"
-    assert resolve_platform("Display") == "Display"  # internal name accepted verbatim
+    assert WALMART.resolve_ad_unit("sponsored-search") == "Sponsored Products"
+    assert WALMART.resolve_ad_unit("Sponsored Search") == "Sponsored Products"
+    assert WALMART.resolve_ad_unit("search") == "Sponsored Products"
+    assert WALMART.resolve_ad_unit("display") == "Display"
+    # internal name accepted verbatim
+    assert WALMART.resolve_ad_unit("Display") == "Display"
+    # and no platform at all falls back to the portal's own default
+    assert WALMART.resolve_ad_unit(None) == "Display"
 
 
 def test_unknown_platform_lists_the_valid_ones() -> None:
-    with pytest.raises(AuraError, match="unknown platform"):
-        resolve_platform("carousel")
+    with pytest.raises(PortalError, match="unknown platform"):
+        WALMART.resolve_ad_unit("carousel")
 
 
 def test_identity_from_auth_payload() -> None:
@@ -163,8 +173,8 @@ def test_unknown_issue_reports_the_available_ones() -> None:
         )
 
 
-def test_empty_tree_explains_which_platforms_work() -> None:
-    with pytest.raises(AuraError, match="Sponsored Products"):
+def test_empty_tree_names_the_ad_unit_and_channel_it_tried() -> None:
+    with pytest.raises(AuraError, match="SponsoredVideos.*channel 'p'"):
         resolve_categories(
             _session(tree={"Level1Categories": [], "Level2Categories": {}}),
             category="API",
@@ -175,7 +185,8 @@ def test_empty_tree_explains_which_platforms_work() -> None:
 
 
 def test_payload_declares_every_parameter() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d", advertisers="1, 2"))
+    draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
+    payload = prepare(_session(), draft, WALMART)
     # Apex binds by name, so a missing parameter is not the same as a blank one.
     assert len(payload) == 31
     assert payload["problemDomain"] == "API Support"
@@ -187,7 +198,8 @@ def test_payload_declares_every_parameter() -> None:
 
 
 def test_additional_fields_only_carry_declared_ones() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d", advertisers="1, 2"))
+    draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
+    payload = prepare(_session(), draft, WALMART)
     extra = json.loads(payload["additionalFieldsString"])
     # a JSON list of title/value pairs: Apex deserializes it into a List, and
     # rejects any other key by name
@@ -199,8 +211,23 @@ def test_additional_fields_only_carry_declared_ones() -> None:
     assert "Advertiser Account Name" not in by_title
 
 
+def test_a_category_declaring_no_forms_drops_the_advertisers() -> None:
+    # Sam's Club declares no Support_Form__c records on any category, so there
+    # is nowhere to put the advertiser ids and they never reach the wire. The
+    # filed case came back with Advertisers Affected set from the account name
+    # instead, so the CLI warns rather than dropping them silently.
+    bare = json.loads(json.dumps(TREE))
+    del bare["Level2Categories"]["L1API"][0]["Support_Forms__r"]
+    payload = prepare(
+        _session(tree=bare),
+        CaseDraft(subject="s", description="d", advertisers="12345, 67890"),
+        WALMART,
+    )
+    assert json.loads(payload["additionalFieldsString"]) == []
+
+
 def test_partnership_fields_are_left_empty() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d"))
+    payload = prepare(_session(), CaseDraft(subject="s", description="d"), WALMART)
     # Partnership__c is a lookup to a Partnership record, not an Account; an
     # account id there fails the insert with FIELD_INTEGRITY_EXCEPTION
     assert payload["partnershipType"] == ""
@@ -209,7 +236,9 @@ def test_partnership_fields_are_left_empty() -> None:
 
 
 def test_search_platform_flows_through_to_the_payload() -> None:
-    draft = CaseDraft(subject="s", description="d", platform="sponsored-search")
+    draft = CaseDraft(
+        subject="s", description="d", ad_unit=WALMART.resolve_ad_unit("sponsored-search")
+    )
     payload = build_payload(
         draft,
         Identity.fetch(_session()),
@@ -219,3 +248,22 @@ def test_search_platform_flows_through_to_the_payload() -> None:
     )
     assert payload["adUnit"] == "Sponsored Products"
     assert payload["product"] == "Sponsored Products"
+
+
+def test_prepare_refuses_a_portal_whose_open_case_is_unmapped() -> None:
+    # The gate is a property of the profile, not of one retailer: a portal that
+    # declares its openCase unmapped must refuse before anything reaches the
+    # wire, because the failure mode is a real but misrouted case that no dry
+    # run catches.
+    unmapped = replace(SAMSCLUB, can_create=False, create_hint="file it by hand")
+    with pytest.raises(PortalError, match="not mapped"):
+        prepare(_session(), CaseDraft(subject="s", description="d"), unmapped)
+
+
+def test_identity_falls_back_to_the_advertiser_lookup() -> None:
+    # Sam's Club leaves AccountId off the contact record and names the
+    # advertiser through getAdvertiserInfo instead.
+    session = _session(auth={"userAuthenticated": True, "userType": "Advertiser-Ad_Agency"})
+    identity = Identity.fetch(session)
+    assert identity.account_id == "0018A00001EXAMPLE"
+    assert identity.account_name == "Example Agency"

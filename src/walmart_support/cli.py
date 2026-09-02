@@ -21,7 +21,6 @@ import httpx
 from .attachments import Upload, upload_file
 from .aura import AuraError, AuraSession, SessionExpired
 from .auth import (
-    SESSION_PATH,
     AuthState,
     build_client,
     check_auth,
@@ -29,6 +28,7 @@ from .auth import (
     load_session,
     login,
     save_session,
+    session_path,
     with_session,
 )
 from .cases import (
@@ -48,14 +48,13 @@ from .cases import (
 from .config import CONFIG_PATH, Config, load_config
 from .create import (
     CONTACT_PAGE,
-    PLATFORMS,
     CaseDraft,
     Identity,
     fetch_category_tree,
     prepare,
-    resolve_platform,
     submit,
 )
+from .portals import PORTALS, PortalError
 
 
 def _version() -> str:
@@ -97,7 +96,8 @@ def _parse_since(value: str) -> date:
 
 
 def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
-    cached = load_session()
+    cache = session_path(cfg.base_url)
+    cached = load_session(cache)
     client = build_client(cfg, cached)
     try:
         state = check_auth(client)
@@ -111,13 +111,14 @@ def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
                 # why it broke instead of failing like any other command.
                 state = AuthState(authenticated=False, error=str(exc))
             if state.authenticated:
-                save_session(client)
+                save_session(client, cache)
         payload: dict[str, object] = {
             "authenticated": state.authenticated,
             "auth_source": source,
+            "portal": cfg.portal.key,
             "username": cfg.username or "(not configured)",
             "base_url": cfg.base_url,
-            "session_cache": str(SESSION_PATH),
+            "session_cache": str(cache),
             "error": state.error,
         }
         if args.json:
@@ -130,8 +131,9 @@ def _cmd_auth_check(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def _cmd_auth_logout(cfg: Config, args: argparse.Namespace) -> int:
-    removed = clear_session()
-    print("cached session discarded" if removed else "no cached session")
+    removed = clear_session(session_path(cfg.base_url))
+    label = cfg.portal.label
+    print(f"{label}: cached session discarded" if removed else f"{label}: no cached session")
     return 0
 
 
@@ -167,7 +169,7 @@ def _cmd_cases_list(cfg: Config, args: argparse.Namespace) -> int:
 def _cmd_cases_get(cfg: Config, args: argparse.Namespace) -> int:
     detail = with_session(cfg, ACTIVITY_PAGE, lambda s: fetch_case_detail(s, args.case_number))
     if args.json:
-        print(json.dumps(detail.as_dict(), indent=2))
+        print(json.dumps({"portal": cfg.portal.key} | detail.as_dict(), indent=2))
         return 0
 
     payload = detail.as_dict()
@@ -186,7 +188,7 @@ def _cmd_cases_get(cfg: Config, args: argparse.Namespace) -> int:
 def _cmd_cases_replies(cfg: Config, args: argparse.Namespace) -> int:
     detail = with_session(cfg, ACTIVITY_PAGE, lambda s: fetch_case_detail(s, args.case_number))
     comments = detail.comments
-    if args.from_walmart:
+    if args.from_support:
         comments = [c for c in comments if not c.from_advertiser]
     if args.latest:
         comments = comments[-args.latest :]
@@ -200,7 +202,7 @@ def _cmd_cases_replies(cfg: Config, args: argparse.Namespace) -> int:
         return 0
     print(f"case {detail.case_number} — {detail.status}\n")
     for comment in comments:
-        marker = "us" if comment.from_advertiser else "WALMART"
+        marker = "us" if comment.from_advertiser else cfg.portal.support_label
         print(f"--- [{comment.created_date[:19]}] {marker} · {comment.author}")
         print(comment.body or "(empty)")
         print()
@@ -222,13 +224,17 @@ def _cmd_cases_attach(cfg: Config, args: argparse.Namespace) -> int:
 
     after, uploads = with_session(cfg, ACTIVITY_PAGE, run)
     if args.json:
-        payload = {"attachments": after, "uploaded": [vars(u) for u in uploads]}
+        payload = {
+            "portal": cfg.portal.key,
+            "attachments": after,
+            "uploaded": [vars(u) for u in uploads],
+        }
         print(json.dumps(payload, indent=2))
         return 0
     for upload in uploads:
         print(f"{upload.file_name}  {upload.byte_size} bytes  {upload.content_type}")
         print(f"   {upload.content_version_id}")
-    print(f"\ncase {args.case_number} now reports {after} attachment(s)")
+    print(f"\n{cfg.portal.label} case {args.case_number} now reports {after} attachment(s)")
     return 0
 
 
@@ -253,28 +259,64 @@ def _cmd_cases_reply(cfg: Config, args: argparse.Namespace) -> int:
 
     status, count = with_session(cfg, ACTIVITY_PAGE, run)
     if args.json:
-        print(json.dumps({"case": args.case_number, "status": status, "comments": count}, indent=2))
+        payload = {
+            "portal": cfg.portal.key,
+            "case": args.case_number,
+            "status": status,
+            "comments": count,
+        }
+        print(json.dumps(payload, indent=2))
     else:
-        print(f"posted to case {args.case_number} ({status}); {count} message(s) on the thread")
+        print(
+            f"posted to {cfg.portal.label} case {args.case_number} ({status}); "
+            f"{count} message(s) on the thread"
+        )
     return 0
 
 
 def _cmd_cases_close(cfg: Config, args: argparse.Namespace) -> int:
+    portal = cfg.portal
+    if not portal.can_close:
+        # Firing it anyway would answer SUCCESS and change nothing, which reads
+        # as a closed case to anyone who does not re-read the status.
+        print(
+            f"closing a case is not supported for {portal.label}. {portal.close_hint}",
+            file=sys.stderr,
+        )
+        return 2
+
     def run(session: AuraSession) -> tuple[str, str]:
         detail = fetch_case_detail(session, args.case_number)
         return detail.status, close_case(session, detail.case_id)
 
     before, after = with_session(cfg, ACTIVITY_PAGE, run)
+    # The action reports SUCCESS whether or not the status moved, so compare
+    # rather than trusting the call: a silent no-op must not read as a close.
+    closed = bool(after) and after != before
     if args.json:
-        print(json.dumps({"case": args.case_number, "was": before, "now": after}, indent=2))
+        payload = {
+            "portal": portal.key,
+            "case": args.case_number,
+            "was": before,
+            "now": after,
+            "closed": closed,
+        }
+        print(json.dumps(payload, indent=2))
     else:
-        print(f"case {args.case_number}: {before} -> {after or '(status not reported)'}")
+        print(f"{portal.label} case {args.case_number}: {before} -> {after or '(not reported)'}")
+    if not closed:
+        print(
+            f"the portal accepted the request but left case {args.case_number} on "
+            f"{before!r}; it is NOT closed",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
 def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     """Show the support categories the portal's own dropdown offers."""
-    ad_unit = resolve_platform(args.platform)
+    ad_unit = cfg.portal.resolve_ad_unit(args.platform)
 
     def run(session: object) -> list[tuple[object, list[object]]]:
         identity = Identity.fetch(session)  # type: ignore[arg-type]
@@ -312,6 +354,17 @@ def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
+    portal = cfg.portal
+    if not portal.can_create:
+        # Refuse before opening a session: no dry run makes an unmapped
+        # openCase safe to send, and the failure mode is a real case in the
+        # wrong queue.
+        print(
+            f"filing a case is not mapped for {portal.label}. {portal.create_hint}",
+            file=sys.stderr,
+        )
+        return 2
+
     description = Path(args.description_file).read_text()
     draft = CaseDraft(
         subject=args.subject,
@@ -319,16 +372,30 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
         advertisers=args.advertisers or "",
         category=args.category,
         issue=args.issue,
-        platform=args.platform,
+        ad_unit=portal.resolve_ad_unit(args.platform),
     )
 
     def run(session: object) -> dict[str, object]:
-        payload = prepare(session, draft)  # type: ignore[arg-type]
+        payload = prepare(session, draft, portal)  # type: ignore[arg-type]
         if not args.submit:
-            return {"dry_run": payload}
-        return {"filed": submit(session, payload)}  # type: ignore[arg-type]
+            return {"payload": payload, "dry_run": payload}
+        return {"payload": payload, "filed": submit(session, payload)}  # type: ignore[arg-type]
 
     result = with_session(cfg, CONTACT_PAGE, run)  # type: ignore[arg-type]
+
+    # A portal whose categories declare no Support_Form__c records has nowhere
+    # to put the advertiser ids, so they never reach the wire. Confirmed on
+    # Sam's Club, where the filed case came back with Advertisers Affected set
+    # from the account name instead. Say so rather than dropping them quietly,
+    # and say it on --submit too, where it actually costs something.
+    sent = result.get("payload")
+    if draft.advertisers and isinstance(sent, dict):
+        if "Advertisers Affected" not in str(sent.get("additionalFieldsString", "")):
+            print(
+                f"warning: {portal.label} declares no form fields for this category, so "
+                "--advertisers was dropped; put the ids in the description instead",
+                file=sys.stderr,
+            )
 
     if "dry_run" in result:
         payload = result["dry_run"]
@@ -339,7 +406,12 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
         return 0
 
     filed = result["filed"]
-    print(json.dumps(filed, indent=2) if args.json else _describe_payload(filed))
+    if args.json:
+        print(json.dumps({"portal": portal.key, "filed": filed}, indent=2))
+        return 0
+    print(_describe_payload(filed))
+    print()
+    print(f"filed at {portal.label}.")
     return 0
 
 
@@ -362,7 +434,7 @@ _EXAMPLES = """examples:
   walmart-support cases list --status "need info"   cases awaiting a response
   walmart-support cases list --since 30d --limit 10
   walmart-support cases get 10000001                one case, full text
-  walmart-support cases replies 10000001 --from-walmart --latest 1
+  walmart-support cases replies 10000001 --from-support --latest 1
   walmart-support cases list --query "adGroups/list" --since 30d --deep
   walmart-support cases reply 10000001 --message-file answer.txt
   walmart-support cases attach 10000001 ./har.json
@@ -370,16 +442,21 @@ _EXAMPLES = """examples:
                                                     prints the payload; add --submit to file
   walmart-support categories list --platform sponsored-search
 
+  walmart-support --portal samsclub cases list      the Sam's Club portal instead
+  walmart-support --portal samsclub cases get 00010002
+
 notes:
   every command takes --json for machine-readable output
   cases create files nothing unless --submit is given
+  --portal defaults to the config's default.portal, else walmart
+  filing a case is mapped for Walmart only; Sam's Club refuses with exit 2
 """
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="walmart-support",
-        description="Read and file Walmart Connect advertising support cases.",
+        description="Read and file Walmart Connect and Sam's Club advertising support cases.",
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -391,6 +468,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--config", default=None, help=f"config file (default: {CONFIG_PATH})")
+    parser.add_argument(
+        "--portal",
+        default=None,
+        metavar="NAME",
+        help=(
+            f"portal to act on ({', '.join(PORTALS)}); defaults to the "
+            "config's default.portal, else walmart"
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     auth = sub.add_parser("auth", help="authentication helpers").add_subparsers(
@@ -437,7 +523,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     replies = cases.add_parser("replies", help="show a case's conversation")
     replies.add_argument("case_number")
-    replies.add_argument("--from-walmart", action="store_true", help="only messages from support")
+    replies.add_argument("--from-support", action="store_true", help="only messages from support")
     replies.add_argument("--latest", type=int, default=0, help="show only the last N messages")
 
     categories = sub.add_parser(
@@ -445,7 +531,10 @@ def _build_parser() -> argparse.ArgumentParser:
     ).add_subparsers(dest="categories_command", required=True)
     cat_list = categories.add_parser("list", help="show categories and their issues")
     cat_list.add_argument(
-        "--platform", default="display", choices=sorted(PLATFORMS), help="default: display"
+        "--platform",
+        default=None,
+        metavar="NAME",
+        help="ad platform to list for; Walmart only, and defaults to that portal's own",
     )
 
     create = cases.add_parser(
@@ -471,9 +560,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument(
         "--platform",
-        default="display",
-        choices=sorted(PLATFORMS),
-        help="which ad platform the case is about (default: display)",
+        metavar="NAME",
+        default=None,
+        help="which ad platform the case is about; Walmart only",
     )
     create.add_argument(
         "--submit",
@@ -488,7 +577,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        cfg = load_config(Path(args.config) if args.config else CONFIG_PATH)
+        cfg = load_config(Path(args.config) if args.config else CONFIG_PATH, portal=args.portal)
+    except PortalError as exc:
+        # A ValueError, so it must be caught ahead of the clause below or a bad
+        # --portal reads as a broken config file.
+        print(f"{exc}", file=sys.stderr)
+        return 2
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
@@ -518,6 +612,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         with contextlib.suppress(OSError):
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
+    except PortalError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
     except TooManyCandidates as exc:
         print(f"{exc}", file=sys.stderr)
         return 2

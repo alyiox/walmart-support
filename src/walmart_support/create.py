@@ -6,13 +6,19 @@ carries the form fields to collect. ``openCase`` then takes 31 flat parameters
 that restate that selection in both display and backend form.
 
 Category identifiers are looked up by name at call time rather than hardcoded,
-so the mapping follows the portal if Walmart re-labels or re-ids a category.
+so the mapping follows the portal if a category is re-labelled or re-ided.
 
 **The parameter mapping below is inferred**, from the component's published
 method signature plus the category records — not from an observed submit. Only
 the identity and category fields are confirmed. That is why the CLI refuses to
 submit without an explicit flag: a mis-mapped category would file a real but
-misrouted case with Walmart support.
+misrouted case with support.
+
+It was inferred against Walmart, and Sam's Club diverges exactly where that
+would hurt — the account arrives through ``getAdvertiserInfo`` rather than the
+contact record, and no category declares ``Support_Forms__r`` — so
+:func:`prepare` refuses outright on a portal whose profile says creation is
+unmapped.
 """
 
 from __future__ import annotations
@@ -22,40 +28,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .aura import AuraError, AuraSession
+from .portals import WALMART, Portal, PortalError
 
 _COMPONENT = "AC_ContactSupport"
 CONTACT_PAGE = "/s/contact?language=en_US"
 
 DEFAULT_GEO = "US"
 
-# The portal's platform picker maps friendly names onto the ad-unit channel
-# names ``fetchChannels`` publishes. Sponsored Search collapses onto "Sponsored
-# Products" — that is the portal's own behaviour, and why its Platform field
-# shows Sponsored Products for any Search case.
-PLATFORMS: dict[str, str] = {
-    "display": "Display",
-    "sponsored-search": "Sponsored Products",
-    "search": "Sponsored Products",
-    "sponsored-products": "Sponsored Products",
-    "sponsored-brands": "Search Brand Amplifier",
-    "sponsored-videos": "SponsoredVideos",
-    "shop-builder": "ShopBuilder",
-}
-DEFAULT_PLATFORM = "display"
 
-
-def resolve_platform(name: str) -> str:
-    """Map a platform name onto the ad-unit channel the portal expects."""
-    key = name.strip().casefold().replace("_", "-").replace(" ", "-")
-    if key in PLATFORMS:
-        return PLATFORMS[key]
-    # Accept the internal channel names verbatim too.
-    if name in PLATFORMS.values():
-        return name
-    raise AuraError(
-        "platform",
-        f"unknown platform {name!r}; expected one of: {', '.join(sorted(PLATFORMS))}",
-    )
+def _advertiser_account(session: AuraSession) -> tuple[str, str] | None:
+    """Name the advertiser through the portal's own advertiser lookup."""
+    raw = session.apex(_COMPONENT, "getAdvertiserInfo", {})
+    for record in raw if isinstance(raw, list) else []:
+        if isinstance(record, dict) and record.get("Id"):
+            return str(record["Id"]), str(record.get("Name") or "")
+    return None
 
 
 @dataclass(frozen=True)
@@ -75,10 +62,17 @@ class Identity:
             raise AuraError("getAuthenticationStatus", "portal reports an unauthenticated user")
         contact = raw.get("userContact") or {}
         account = contact.get("Account") or {}
+        account_id = str(contact.get("AccountId") or account.get("Id") or "")
+        account_name = str(account.get("Name") or "")
+        # Sam's Club leaves the account off the contact record entirely and
+        # populates its advertiser picker from a separate action, so fall back
+        # to that rather than filing with an empty selectedAccountId.
+        if not account_id and (found := _advertiser_account(session)):
+            account_id, account_name = found
         return cls(
             user_type=str(raw.get("userType") or ""),
-            account_id=str(contact.get("AccountId") or account.get("Id") or ""),
-            account_name=str(account.get("Name") or ""),
+            account_id=account_id,
+            account_name=account_name,
             contact_name=str(contact.get("Name") or raw.get("userName") or ""),
             contact_email=str(contact.get("Email") or ""),
         )
@@ -165,7 +159,7 @@ def resolve_categories(
         raise AuraError(
             "getCaseCategoriesNew",
             f"the portal offers no categories for ad unit {ad_unit!r} on channel "
-            f"{partner_channel!r}; Display and Sponsored Products are the ones it populates",
+            f"{partner_channel!r}; check the ad unit against 'categories list'",
         )
 
     match = next(((l1, kids) for l1, kids in tree if l1.matches(category)), None)
@@ -189,12 +183,10 @@ class CaseDraft:
     advertisers: str = ""
     category: str = "API"
     issue: str = "Endpoint-specific problem"
-    platform: str = DEFAULT_PLATFORM
+    # Already resolved by Portal.resolve_ad_unit: which names are accepted is
+    # the portal's business, not the draft's.
+    ad_unit: str = WALMART.ad_unit
     geo: str = DEFAULT_GEO
-
-    @property
-    def ad_unit(self) -> str:
-        return resolve_platform(self.platform)
 
 
 def build_payload(
@@ -265,8 +257,14 @@ def build_payload(
     }
 
 
-def prepare(session: AuraSession, draft: CaseDraft) -> dict[str, Any]:
-    """Resolve everything needed to file ``draft``, without filing it."""
+def prepare(session: AuraSession, draft: CaseDraft, portal: Portal) -> dict[str, Any]:
+    """Resolve everything needed to file ``draft``, without filing it.
+
+    Refuses on a portal whose ``openCase`` mapping has not been confirmed: the
+    failure mode there is a real but misrouted case, which no dry run catches.
+    """
+    if not portal.can_create:
+        raise PortalError(f"filing a case is not mapped for {portal.label}. {portal.create_hint}")
     identity = Identity.fetch(session)
     selection = resolve_categories(
         session,

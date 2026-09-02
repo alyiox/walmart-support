@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -36,12 +37,20 @@ _AURA_CONFIG = re.compile(r"auraConfig\s*=\s*\{")
 # Each CLI invocation is its own process, so without a cache every command pays
 # a full login — four requests and a Salesforce login event before any real
 # work. Session cookies are cached here and reused until the portal rejects
-# them. The file holds live session cookies, so it is written 0600.
-SESSION_PATH = (
-    Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    / "walmart-support"
-    / "session.json"
-)
+# them. The files hold live session cookies, so they are written 0600.
+SESSION_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "walmart-support"
+
+
+def session_path(base_url: str) -> Path:
+    """Where one portal's cached session lives.
+
+    Keyed by host because the portals are separate Salesforce orgs: replaying
+    Walmart's ``sid`` against Sam's Club authenticates nothing while still
+    looking like a usable cached session, so one shared file would make every
+    other command pay a failed round trip before logging in again.
+    """
+    return SESSION_DIR / f"{urlparse(base_url).hostname or 'portal'}.json"
+
 
 BOOTSTRAP_PAGE = "/s/contact?language=en_US"
 
@@ -71,9 +80,8 @@ class AuthState:
     error: str | None = None
 
 
-def load_session(path: Path | None = None) -> dict[str, str]:
+def load_session(path: Path) -> dict[str, str]:
     """Return cached session cookies, or an empty mapping if there are none."""
-    path = path or SESSION_PATH
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
@@ -84,18 +92,16 @@ def load_session(path: Path | None = None) -> dict[str, str]:
     return {str(k): str(v) for k, v in cookies.items()}
 
 
-def save_session(client: httpx.Client, path: Path | None = None) -> None:
+def save_session(client: httpx.Client, path: Path) -> None:
     """Persist the client's cookies for the next invocation."""
-    path = path or SESSION_PATH
     cookies = {c.name: c.value or "" for c in client.cookies.jar}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"cookies": cookies}))
     path.chmod(0o600)
 
 
-def clear_session(path: Path | None = None) -> bool:
+def clear_session(path: Path) -> bool:
     """Delete the cached session. Returns whether a file was removed."""
-    path = path or SESSION_PATH
     try:
         path.unlink()
         return True
@@ -245,7 +251,8 @@ def open_session(
     A cached session is reused when the portal still accepts it, which keeps the
     common case down to two requests and avoids a login event per command.
     """
-    cached = load_session() if use_cache else {}
+    cache = session_path(cfg.base_url)
+    cached = load_session(cache) if use_cache else {}
     client = build_client(cfg, cached)
     source = "cache" if cached else "none"
 
@@ -260,7 +267,7 @@ def open_session(
             )
 
     if source == "login":
-        save_session(client)
+        save_session(client, cache)
 
     return client, AuraSession.bootstrap(client, page), source
 
@@ -287,7 +294,7 @@ def with_session[T](
     finally:
         client.close()
 
-    clear_session()
+    clear_session(session_path(cfg.base_url))
     client, session, _ = open_session(cfg, page, use_cache=False)
     try:
         return action(session)

@@ -117,7 +117,13 @@ class Comment:
 
     @property
     def who(self) -> str:
-        return "us" if self.from_advertiser else "walmart"
+        """Which side wrote this message.
+
+        Deliberately not the retailer's name: the same conversation shape comes
+        back from both portals, and labelling a Sam's Club reply "walmart"
+        would simply be wrong.
+        """
+        return "us" if self.from_advertiser else "support"
 
     def as_dict(self) -> dict[str, Any]:
         return {

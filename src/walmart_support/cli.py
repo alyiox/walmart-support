@@ -430,25 +430,25 @@ def _describe_payload(payload: object) -> str:
 
 
 _EXAMPLES = """examples:
-  walmart-support auth check                        confirm the portal session
-  walmart-support cases list --status "need info"   cases awaiting a response
-  walmart-support cases list --since 30d --limit 10
-  walmart-support cases get 10000001                one case, full text
-  walmart-support cases replies 10000001 --from-support --latest 1
-  walmart-support cases list --query "adGroups/list" --since 30d --deep
-  walmart-support cases reply 10000001 --message-file answer.txt
-  walmart-support cases attach 10000001 ./har.json
-  walmart-support cases create --subject ... --description-file body.txt
-                                                    prints the payload; add --submit to file
-  walmart-support categories list --platform sponsored-search
+  every command names the portal it acts on
 
-  walmart-support --portal samsclub cases list      the Sam's Club portal instead
+  walmart-support --portal walmart auth check
+  walmart-support --portal walmart cases list --status "need info"
+  walmart-support --portal walmart cases get 10000001
+  walmart-support --portal walmart cases replies 10000001 --from-support
+  walmart-support --portal walmart cases list --query "adGroups/list" --since 30d --deep
+  walmart-support --portal walmart cases reply 10000001 --message-file answer.txt
+  walmart-support --portal walmart cases attach 10000001 ./har.json
+  walmart-support --portal walmart cases create --subject ... --description-file body.txt
+  walmart-support --portal walmart categories list --platform sponsored-search
+
+  walmart-support --portal samsclub cases list
   walmart-support --portal samsclub cases get 00010002
 
 notes:
   every command takes --json for machine-readable output
   cases create files nothing unless --submit is given
-  --portal defaults to the config's default.portal, else walmart
+  --portal is required on every command; there is no default portal
   filing works on both portals; --platform and --advertisers are Walmart only
 """
 
@@ -470,12 +470,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None, help=f"config file (default: {CONFIG_PATH})")
     parser.add_argument(
         "--portal",
-        default=None,
+        required=True,
         metavar="NAME",
-        help=(
-            f"portal to act on ({', '.join(PORTALS)}); defaults to the "
-            "config's default.portal, else walmart"
-        ),
+        help=f"portal to act on ({', '.join(PORTALS)}); required on every command",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

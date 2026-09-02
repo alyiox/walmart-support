@@ -1,6 +1,5 @@
 {
   "default": {
-    "portal": "walmart",
     "timeout": 60
   },
   "portals": {

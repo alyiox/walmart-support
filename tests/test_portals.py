@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from walmart_support.portals import (
-    DEFAULT_PORTAL,
     PORTALS,
     SAMSCLUB,
     WALMART,
@@ -12,8 +11,7 @@ from walmart_support.portals import (
 )
 
 
-def test_walmart_is_the_default() -> None:
-    assert DEFAULT_PORTAL == WALMART.key
+def test_both_portals_are_reachable_by_key() -> None:
     assert set(PORTALS) == {"walmart", "samsclub"}
 
 

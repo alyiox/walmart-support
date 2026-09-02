@@ -29,7 +29,7 @@ def cli(tmp_path: Path) -> Callable[..., int]:
     config = _config(tmp_path)
 
     def run(*argv: str) -> int:
-        return main(["--config", str(config), *argv])
+        return main(["--config", str(config), "--portal", "walmart", *argv])
 
     return run
 
@@ -80,6 +80,53 @@ def test_close_refuses_a_portal_where_it_is_a_silent_no_op(
     err = capsys.readouterr().err
     assert "not supported" in err
     assert "Close Case" in err
+
+
+def test_omitting_the_portal_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # There is no default portal anywhere, so a command that does not name one
+    # cannot run. argparse refuses it, which is exit 2 like every usage fault.
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--config", str(_config(tmp_path)), "cases", "list"])
+
+    assert exit_info.value.code == 2
+    assert "--portal" in capsys.readouterr().err
+
+
+def test_the_config_cannot_select_a_portal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A default.portal left over from an older config is inert: the flag is
+    # the only thing that chooses, so the stale key cannot redirect a write.
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "default": {"portal": "samsclub"},
+                "portals": {"walmart": {"username": "u", "password": "p"}},
+            }
+        )
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--config", str(path), "cases", "list"])
+    assert exit_info.value.code == 2
+
+    # And naming Walmart reaches Walmart, not the portal the stale key names.
+    assert main(["--config", str(path), "--portal", "walmart", "cases", "close", "1"]) == 1
+    assert "samsclub" not in capsys.readouterr().err
+
+
+def test_the_flag_alone_selects_a_portal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Nothing in the config chooses a portal, so the flag has to be enough.
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"portals": {"samsclub": {"username": "u", "password": "p"}}}))
+
+    assert main(["--config", str(path), "--portal", "samsclub", "cases", "close", "1"]) == 2
+    assert "not supported" in capsys.readouterr().err
 
 
 def test_an_unknown_portal_is_a_usage_error(

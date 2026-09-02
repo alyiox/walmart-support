@@ -32,7 +32,7 @@ addressable from here.
 
 ## Closing is not supported
 
-`cases close --portal samsclub` exits 2 without contacting the portal.
+`walmart-support --portal samsclub cases close ...` exits 2 without contacting the portal.
 
 `closeCaseSt` — the action that closes a Walmart case — resolves on this org, answers SUCCESS, and
 returns the case with its status **untouched**. That is worse than an error: nothing distinguishes
@@ -73,7 +73,8 @@ Case numbers are zero-padded and 8 digits (`00010002`), not Walmart's bare `1000
 
 ## Categories
 
-Nine level-1 categories, from the live portal. `categories list --portal samsclub` re-reads them.
+Nine level-1 categories, from the live portal.
+`walmart-support --portal samsclub categories list` re-reads them.
 
 | Category | Issues |
 | --- | --- |

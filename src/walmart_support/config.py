@@ -16,14 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .portals import DEFAULT_PORTAL, Portal, resolve_portal
+from .portals import PORTALS, Portal, resolve_portal
 
 CONFIG_PATH = Path.home() / ".config" / "walmart-support" / "config.json"
 
 DEFAULT_TIMEOUT = 60
 
 EXPECTED_SHAPE = """{
-  "default": {"portal": "walmart", "timeout": 60},
+  "default": {"timeout": 60},
   "portals": {
     "walmart":  {"username": "...", "password": "..."},
     "samsclub": {"username": "...", "password": "..."}
@@ -75,12 +75,12 @@ def _timeout(*candidates: object) -> int:
     return DEFAULT_TIMEOUT
 
 
-def load_config(path: Path = CONFIG_PATH, *, portal: str | None = None) -> Config:
+def load_config(path: Path = CONFIG_PATH, *, portal: str) -> Config:
     """Load settings for one portal.
 
-    ``portal`` is the ``--portal`` flag. Without it the file's own
-    ``default.portal`` decides, and without that, Walmart — so a bare command
-    always names a portal rather than refusing.
+    ``portal`` is the ``--portal`` flag, and it is the only thing that selects
+    one. The config describes each portal but never picks between them: a
+    portal is a retailer, and every command says out loud which one it acts on.
     """
     if not path.exists():
         raise RuntimeError(
@@ -90,7 +90,10 @@ def load_config(path: Path = CONFIG_PATH, *, portal: str | None = None) -> Confi
     raw: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
 
     defaults = _mapping(raw, "default")
-    selected = resolve_portal(str(portal or defaults.get("portal") or DEFAULT_PORTAL))
+    if not portal:
+        # The CLI makes --portal required, so this guards other callers.
+        raise RuntimeError(f"no portal named. Pass one of: {', '.join(PORTALS)}.")
+    selected = resolve_portal(portal)
 
     portals = _mapping(raw, "portals")
     section = _mapping(portals, selected.key)

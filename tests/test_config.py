@@ -27,22 +27,30 @@ def _both(**default: Any) -> dict[str, Any]:
     }
 
 
-def test_defaults_to_walmart_without_a_named_portal(tmp_path: Path) -> None:
-    cfg = load_config(_write(tmp_path, _both()))
+def test_an_empty_portal_refuses_rather_than_guessing(tmp_path: Path) -> None:
+    # A portal is a retailer, so there is nothing sensible to fall back to.
+    # The CLI makes --portal required; this is the guard for other callers.
+    with pytest.raises(RuntimeError, match="no portal named"):
+        load_config(_write(tmp_path, _both()), portal="")
+
+
+def test_a_named_portal_resolves(tmp_path: Path) -> None:
+    cfg = load_config(_write(tmp_path, _both()), portal="walmart")
     assert cfg.portal is WALMART
     assert cfg.base_url == WALMART.base_url
     assert cfg.timeout == DEFAULT_TIMEOUT
     assert cfg.has_credentials
 
 
-def test_the_config_default_selects_a_portal(tmp_path: Path) -> None:
-    cfg = load_config(_write(tmp_path, _both(portal="samsclub")))
-    assert cfg.portal is SAMSCLUB
-    assert cfg.username == "s@example.com"
-    assert cfg.base_url == SAMSCLUB.base_url
+def test_the_argument_alone_selects_a_portal(tmp_path: Path) -> None:
+    path = _write(tmp_path, _both())
+    assert load_config(path, portal="samsclub").username == "s@example.com"
+    assert load_config(path, portal="walmart").username == "w@example.com"
 
 
-def test_the_argument_beats_the_config_default(tmp_path: Path) -> None:
+def test_a_portal_key_in_the_config_does_not_select_anything(tmp_path: Path) -> None:
+    # default.portal was removed; a leftover one from an old config must not
+    # quietly override the flag.
     cfg = load_config(_write(tmp_path, _both(portal="samsclub")), portal="walmart")
     assert cfg.portal is WALMART
     assert cfg.username == "w@example.com"
@@ -72,7 +80,7 @@ def test_a_portal_may_override_its_base_url(tmp_path: Path) -> None:
     # Pointing one portal at a sandbox, while the profile supplies the rest.
     raw = _both()
     raw["portals"]["walmart"]["base_url"] = "https://sandbox.test/"
-    assert load_config(_write(tmp_path, raw)).base_url == "https://sandbox.test"
+    assert load_config(_write(tmp_path, raw), portal="walmart").base_url == "https://sandbox.test"
 
 
 def test_a_missing_section_names_what_is_configured(tmp_path: Path) -> None:
@@ -94,13 +102,13 @@ def test_a_session_cannot_be_configured_by_hand(tmp_path: Path) -> None:
     # a stray "cookie" key must not authenticate anything.
     raw = {"portals": {"walmart": {"cookie": "abc"}}}
     with pytest.raises(RuntimeError, match="No credentials found"):
-        load_config(_write(tmp_path, raw))
+        load_config(_write(tmp_path, raw), portal="walmart")
 
 
 def test_a_missing_file_names_the_config_path(tmp_path: Path) -> None:
     target = tmp_path / "absent.json"
     with pytest.raises(RuntimeError, match=re.escape(str(target))):
-        load_config(target)
+        load_config(target, portal="walmart")
 
 
 def test_the_environment_cannot_supply_credentials(
@@ -111,4 +119,4 @@ def test_the_environment_cannot_supply_credentials(
     monkeypatch.setenv("WALMART_SUPPORT_USERNAME", "env@example.com")
     monkeypatch.setenv("WALMART_SUPPORT_PASSWORD", "env-pw")
     with pytest.raises(RuntimeError):
-        load_config(tmp_path / "absent.json")
+        load_config(tmp_path / "absent.json", portal="walmart")

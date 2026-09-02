@@ -40,4 +40,4 @@ def run(session: AuraSession) -> None:
 
 
 if __name__ == "__main__":
-    with_session(load_config(), CASE_PAGE, run)
+    with_session(load_config(portal="walmart"), CASE_PAGE, run)

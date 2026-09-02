@@ -28,33 +28,36 @@ Credentials live in `~/.config/walmart-support/config.json`, one section per por
 `--config` points elsewhere.
 
 Every command logs in on its own and caches the session per portal, so there is nothing to run
-first. When a command exits 1 with `portal error:`, `walmart-support auth check` tells you whether
-the credentials or the portal is at fault: a refused login is reported with the portal's own
-wording, under `error` in `--json`. It is a diagnostic, not a prerequisite, and retrying it in a
-loop will not fix a rejected login.
+first. When a command exits 1 with `portal error:`, `auth check` tells you whether the credentials
+or the portal is at fault: a refused login is reported with the portal's own wording, under `error`
+in `--json`. It is a diagnostic, not a prerequisite, and retrying it in a loop will not fix a
+rejected login.
 
 `authenticated False` from that check is usually a **stale cached session, not bad credentials** —
-`walmart-support auth logout` and re-running the original command clears it. Rule this out before
-reporting the portal as down.
+`walmart-support --portal <portal> auth logout` and re-running the original command clears it.
+Rule this out before reporting the portal as down.
 
 ## Choosing a portal
 
-`--portal walmart` or `--portal samsclub`, before the subcommand.
+`--portal walmart` or `--portal samsclub`, before the subcommand. **Required on every command** —
+nothing in the config selects a portal, so a command that omits it exits 2 rather than reach a
+retailer nobody named.
 
 ```bash
-walmart-support cases list                        # the config's default.portal
+walmart-support --portal walmart cases list       # Walmart Connect
 walmart-support --portal samsclub cases list      # Sam's Club
+walmart-support cases list                        # error: the following arguments are required: --portal
 ```
 
-Each portal caches its own session, keyed by host, so switching does not force a re-login. The
-default is silent, so **say which portal you acted on** when reporting back — the write commands
-name it in their own output, and `--json` carries a `portal` field.
+Each portal caches its own session, keyed by host, so switching does not force a re-login. Every
+command names its portal, so **say which one you acted on** when reporting back — the write
+commands name it in their own output, and `--json` carries a `portal` field.
 
 ## `--json` is global, so it goes first
 
 ```bash
-walmart-support --json cases list --since 30d   # correct
-walmart-support cases list --json               # error: unrecognized arguments
+walmart-support --json --portal walmart cases list --since 30d   # correct
+walmart-support --portal walmart cases list --json               # error: unrecognized arguments
 ```
 
 `--portal` is global too, so it goes in the same place.
@@ -65,7 +68,7 @@ An unfiltered `cases list` can run to hundreds of rows, and a case body is long.
 shell before the output reaches you:
 
 ```bash
-walmart-support --json cases list --since 30d | jq -r '.[] | select(.status | test("Need")) | .case_number'
+walmart-support --json --portal walmart cases list --since 30d | jq -r '.[] | select(.status | test("Need")) | .case_number'
 ```
 
 ## Reading a thread
@@ -75,7 +78,7 @@ them, so a raw thread is mostly repetition of what you already sent. `--from-sup
 messages:
 
 ```bash
-walmart-support cases replies 10000001 --from-support
+walmart-support --portal walmart cases replies 10000001 --from-support
 ```
 
 **Read the whole thread; never narrow it to the newest message.** Automated queue notices stack on

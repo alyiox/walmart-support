@@ -1,7 +1,7 @@
 # Walmart Connect portal
 
-`--portal walmart`, and the default when nothing names a portal. The portal `--platform` applies
-to, and the only one `cases close` works against.
+`--portal walmart`, named on every command. The portal `--platform` applies to, and the only
+one `cases close` works against.
 
 ## Status vocabulary
 
@@ -24,7 +24,7 @@ Internal` 2, `WIP` 1, `Need Info` 1.
 bulk, since the mix moves:
 
 ```bash
-walmart-support --json cases list | jq -r '.[].status' | sort | uniq -c | sort -rn
+walmart-support --json --portal walmart cases list | jq -r '.[].status' | sort | uniq -c | sort -rn
 ```
 
 `--status` matches on whole words, so `--status "need info"` catches both `Need Info` and
@@ -34,9 +34,10 @@ walmart-support --json cases list | jq -r '.[].status' | sort | uniq -c | sort -
 
 One case per issue.
 
-1. `walmart-support categories list --platform <platform>` — the `--category` and `--issue` names
-   must match the portal's own dropdown exactly, and they differ per platform.
-2. `walmart-support cases create ...` prints the payload and files **nothing**.
+1. `walmart-support --portal walmart categories list --platform <platform>` — the `--category`
+   and `--issue` names must match the portal's own dropdown exactly, and they differ per
+   platform.
+2. `walmart-support --portal walmart cases create ...` prints the payload and files **nothing**.
 3. Show that payload to the user, then re-run the identical command with `--submit`.
 
 Never add `--submit` to the first attempt. It files a new record into a real support queue.

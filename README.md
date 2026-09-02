@@ -52,28 +52,29 @@ mkdir -p ~/.config/walmart-support
 cp config.example.json ~/.config/walmart-support/config.json
 $EDITOR ~/.config/walmart-support/config.json
 
-uvx walmart-support auth check
-uvx walmart-support cases list --status "need info"
-uvx walmart-support cases get 10000001
-uvx walmart-support cases replies 10000001 --from-support
+uvx walmart-support --portal walmart auth check
+uvx walmart-support --portal walmart cases list --status "need info"
+uvx walmart-support --portal walmart cases get 10000001
+uvx walmart-support --portal walmart cases replies 10000001 --from-support
 
 # the same commands against Sam's Club
 uvx walmart-support --portal samsclub cases list --limit 5
 uvx walmart-support --portal samsclub cases get 00010002
 
-uvx walmart-support cases create \
+uvx walmart-support --portal walmart cases create \
   --platform display \
   --category "API Support" --issue "Endpoint-specific problem" \
   --subject "Display API: ..." --advertisers "111111, 222222" \
   --description-file ./body.txt                # prints the payload
-uvx walmart-support cases create ... --submit   # actually files it
+uvx walmart-support --portal walmart cases create ... --submit   # actually files it
 
 # where the --category and --issue names come from
-uvx walmart-support categories list --platform sponsored-search
+uvx walmart-support --portal walmart categories list --platform sponsored-search
 ```
 
-`--portal` and `--json` are global, so they go before the subcommand. Without `--portal`, the
-config's `default.portal` decides, and without that, Walmart.
+`--portal` and `--json` are global, so they go before the subcommand. `--portal` is required on
+every command: nothing in the config selects a portal, so each invocation says which retailer it
+acts on rather than inheriting a choice made elsewhere.
 
 Reaching for it daily, or working offline? `uv tool install walmart-support`
 puts it on `PATH` and starts faster; `walmart-support --version` reports which
@@ -86,8 +87,8 @@ walmart-support ...` to exercise your working tree.
 files to one:
 
 ```bash
-walmart-support cases reply 10000001 --message-file answer.txt
-walmart-support cases attach 10000001 ./har.json ./adgroup.json
+walmart-support --portal walmart cases reply 10000001 --message-file answer.txt
+walmart-support --portal walmart cases attach 10000001 ./har.json ./adgroup.json
 ```
 
 Neither is gated behind a confirmation flag, unlike `cases create`: they act on
@@ -154,8 +155,8 @@ of which the method signature revealed:
 ### Closing and replying
 
 ```bash
-walmart-support cases reply 10000004 --message-file answer.txt
-walmart-support cases close 10000004   # New -> Closed
+walmart-support --portal walmart cases reply 10000004 --message-file answer.txt
+walmart-support --portal walmart cases close 10000004   # New -> Closed
 ```
 
 `cases close` verifies the status actually moved and exits 1 if it did not, so
@@ -198,7 +199,7 @@ command pay a failed round trip before logging in again.
 
 A session that dies mid-command is retried once from a clean login, because
 Salesforce reports an invalid session in the middle of a request rather than up
-front. `walmart-support auth logout` discards the cached session.
+front. `walmart-support --portal walmart auth logout` discards the cached session.
 
 ## Configuration
 
@@ -206,7 +207,7 @@ front. `walmart-support auth logout` discards the cached session.
 
 ```json
 {
-  "default": { "portal": "walmart", "timeout": 60 },
+  "default": { "timeout": 60 },
   "portals": {
     "walmart":  { "username": "you@example.com", "password": "..." },
     "samsclub": { "username": "you@example.com", "password": "..." }
@@ -216,7 +217,6 @@ front. `walmart-support auth logout` discards the cached session.
 
 | Key | Required | Description |
 | --- | --- | --- |
-| `default.portal` | no | Portal used when `--portal` is absent. Defaults to `walmart`. |
 | `default.timeout` | no | Per-request timeout in seconds (default 60). |
 | `portals.<key>.username` | yes | Portal login email. |
 | `portals.<key>.password` | yes | Portal password. |
@@ -254,10 +254,10 @@ request per candidate:
 
 ```bash
 # finds nothing: the term sits past where the list truncates the subject
-walmart-support cases list --query "targeting of a LIVE ad group"
+walmart-support --portal walmart cases list --query "targeting of a LIVE ad group"
 
 # finds both cases
-walmart-support cases list --query "targeting of a LIVE ad group" --since 2026-08-01 --deep
+walmart-support --portal walmart cases list --query "targeting of a LIVE ad group" --since 2026-08-01 --deep
 ```
 
 Because it fans out, `--deep` refuses to run on more candidates than its cap
@@ -274,9 +274,9 @@ stores, with each message attributed to `us` or the portal's own name (`WALMART`
 does not have to know which portal it read:
 
 ```bash
-walmart-support cases replies 10000001                  # whole thread
-walmart-support cases replies 10000001 --from-support   # skip our own posts
-walmart-support cases replies 10000001 --latest 1       # just the newest
+walmart-support --portal walmart cases replies 10000001                  # whole thread
+walmart-support --portal walmart cases replies 10000001 --from-support   # skip our own posts
+walmart-support --portal walmart cases replies 10000001 --latest 1       # just the newest
 ```
 
 Support's acknowledgement mails quote the entire case body back, and later

@@ -163,7 +163,6 @@ SAMSCLUB = Portal(
 )
 
 PORTALS: Mapping[str, Portal] = MappingProxyType({p.key: p for p in (WALMART, SAMSCLUB)})
-DEFAULT_PORTAL = WALMART.key
 
 # Spellings a person would reasonably type for the two brands.
 _ALIASES: Mapping[str, str] = MappingProxyType(

@@ -16,3 +16,12 @@ happened.
 - **Prefer non-terminal entities as witnesses.** A COMPLETED ad group or an ARCHIVED audience lets
   the platform dismiss the report. Read the expiry off the **ad group's** own `endDate`, never the
   campaign's, and swap in a fresh witness while drafting the follow-up that cites it.
+
+## Recording a re-verification
+
+One dated record per recheck, and **never edit an earlier verdict** — it is evidence of what the
+platform did on that date. A correction is a new dated record, or an `## ADDENDUM — <date>` appended
+to the one it revises.
+
+When no recheck ran, carry the previous date forward untouched, however old it looks. A verification
+date that moves without a run is the one error the next reader cannot detect.

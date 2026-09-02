@@ -30,6 +30,15 @@ walmart-support --json cases list | jq -r '.[].status' | sort | uniq -c | sort -
 `--status` matches on whole words, so `--status "need info"` catches both `Need Info` and
 `Needs Info - Internal`, which are distinct portal statuses.
 
+## Linking to a case
+
+A case number is enough to deep-link the portal, which is what to record wherever a case is tracked
+outside the CLI:
+
+```
+https://advertisinghelp.walmart.com/s/cases?casenumber=<case#>&language=en_US
+```
+
 ## Filing a case
 
 One case per issue.

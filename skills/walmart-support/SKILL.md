@@ -92,6 +92,10 @@ Reads are cheap and time out often, so retry them freely. After a failed **write
 `cases attach`), re-read the thread before retrying — the write may have landed, and a blind retry
 double-posts.
 
+**A thread with no new reply for 3+ days is a stall, not a cue to act.** Report it as one, together
+with anything you have drafted and not sent. A follow-up reply is the move, and whether to send it
+is the user's call — re-running the failing API is not a substitute for it.
+
 ## Searching
 
 - `--query` alone matches the abbreviated subject and description that the list action returns.

@@ -37,6 +37,10 @@ jobs:
             [ "$v" = "$pkg" ] || {
               echo "::error file=$f::version $v does not match package $pkg"; exit 1; }
           done
+          m=.cursor-plugin/marketplace.json
+          v=$(jq -r '.plugins[] | select(.name == "walmart-support") | .version' "$m")
+          [ "$v" = "$pkg" ] || {
+            echo "::error file=$m::version $v does not match package $pkg"; exit 1; }
           if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "$pkg" ]; then
             echo "::error::tag ${{ github.ref_name }} does not match package version $pkg"
             exit 1

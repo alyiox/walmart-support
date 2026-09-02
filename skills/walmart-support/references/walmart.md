@@ -1,7 +1,7 @@
 # Walmart Connect portal
 
-`--portal walmart`, and the default when nothing names a portal. The only portal whose `openCase`
-mapping is confirmed, so the only one `cases create` will file against.
+`--portal walmart`, and the default when nothing names a portal. The portal `--platform` applies
+to, and the only one `cases close` works against.
 
 ## Status vocabulary
 
@@ -29,15 +29,6 @@ walmart-support --json cases list | jq -r '.[].status' | sort | uniq -c | sort -
 
 `--status` matches on whole words, so `--status "need info"` catches both `Need Info` and
 `Needs Info - Internal`, which are distinct portal statuses.
-
-## Linking to a case
-
-A case number is enough to deep-link the portal, which is what to record wherever a case is tracked
-outside the CLI:
-
-```
-https://advertisinghelp.walmart.com/s/cases?casenumber=<case#>&language=en_US
-```
 
 ## Filing a case
 
@@ -71,11 +62,3 @@ Raw cURL request(s) and raw response(s), verbatim, then one line stating the exp
 Support traces from the wire, so paraphrase nothing. `assets/case-description.md` is the skeleton.
 
 Subject: product + endpoint + symptom + environment, concise. Advertiser ids go in `--advertisers`.
-
-The portal is reachable in a browser too, but there is no reason to drive it: `cases create` takes
-every field the form has, without a manual login.
-
-## The reply cap figure
-
-The 4000-character cap that `cases reply` enforces was measured here. Sam's Club runs the same Apex
-class but the number has not been confirmed against it.

@@ -15,7 +15,7 @@ the portal you are working on, because **the status vocabularies overlap only on
 Walmart can close a case:
 
 - `references/walmart.md` — status vocabulary, filing playbook, `--platform` selection
-- `references/samsclub.md` — status vocabulary, category tree, why filing is refused
+- `references/samsclub.md` — status vocabulary, category tree, the `--advertisers` caveat
 - `references/verifying-fix-claims.md` — proving a claimed Ads API fix actually shipped
 
 ## Before anything
@@ -24,8 +24,8 @@ Run `walmart-support --version`. If the command is missing, `uvx walmart-support
 command below without installing anything.
 
 Credentials live in `~/.config/walmart-support/config.json`, one section per portal — see
-`config.example.json`. That file is the only source; there is no environment fallback, so which
-credentials a command used is always answerable by reading one path. `--config` points elsewhere.
+`config.example.json`. That file is the only source — there is no environment fallback.
+`--config` points elsewhere.
 
 Every command logs in on its own and caches the session per portal, so there is nothing to run
 first. When a command exits 1 with `portal error:`, `walmart-support auth check` tells you whether
@@ -34,16 +34,15 @@ wording, under `error` in `--json`. It is a diagnostic, not a prerequisite, and 
 loop will not fix a rejected login.
 
 `authenticated False` from that check is usually a **stale cached session, not bad credentials** —
-`walmart-support auth logout` and re-running the original command clears it. There is no
-`auth login`; every command logs in on its own. Rule this out before reporting the portal as down.
+`walmart-support auth logout` and re-running the original command clears it. Rule this out before
+reporting the portal as down.
 
 ## Choosing a portal
 
-`--portal walmart` or `--portal samsclub`, before the subcommand. Without it the config's
-`default.portal` decides, and without that, Walmart.
+`--portal walmart` or `--portal samsclub`, before the subcommand.
 
 ```bash
-walmart-support cases list                        # Walmart, via the default
+walmart-support cases list                        # the config's default.portal
 walmart-support --portal samsclub cases list      # Sam's Club
 ```
 
@@ -167,8 +166,7 @@ response bodies.
 
 **Goes** — anything of your own side the case does not need: internal ticket keys and scratch
 paths, internal table, pipeline and service names, colleagues and chat references, which customer
-is escalating or how many are affected, your roadmap and what the defect blocks. Keep this list
-concrete for your own team — a vague one does not survive contact with a real draft.
+is escalating or how many are affected, your roadmap and what the defect blocks.
 
 Attachments take the same pass. A HAR carries internal hosts and other advertisers' traffic.
 

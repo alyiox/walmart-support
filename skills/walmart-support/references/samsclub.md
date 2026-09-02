@@ -30,9 +30,6 @@ rather than anything passed on the command line. The CLI warns when you pass the
 So **put advertiser ids in the description body.** It is stored verbatim; these fields are not
 addressable from here.
 
-Otherwise the filing discipline is the same as anywhere: `cases create` prints its payload and files
-nothing until you re-run with `--submit`, and never put `--submit` on the first attempt.
-
 ## Closing is not supported
 
 `cases close --portal samsclub` exits 2 without contacting the portal.

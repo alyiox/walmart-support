@@ -1,7 +1,7 @@
 [project]
 name = "walmart-support"
 version = "0.2.0"
-description = "CLI for Walmart Connect advertising support cases"
+description = "CLI for Walmart Connect and Sam's Club advertising support cases"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

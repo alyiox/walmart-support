@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from html import unescape
+from html import escape, unescape
 from typing import Any
 
 from .aura import AuraError, AuraSession
@@ -222,6 +222,19 @@ def pushdown_limit(limit: int, *, filtered: bool) -> int | None:
     if limit > 0 and not filtered:
         return limit
     return None
+
+
+COMMENT_MAX_CHARS = 4000
+
+
+def rendered_length(message: str) -> int:
+    """Length of ``message`` as the portal stores it.
+
+    ``saveCaseComment`` escapes the text and turns every newline into ``<br>``,
+    then measures *that* against its own cap, so a blank line between
+    paragraphs costs 8 characters rather than 2.
+    """
+    return len(escape(message).replace("\n", "<br>"))
 
 
 def post_comment(session: AuraSession, case_id: str, message: str) -> list[Comment]:

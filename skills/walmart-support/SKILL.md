@@ -134,6 +134,13 @@ Keep a reply to a few lines: the ask, one or two concrete facts, done. No eviden
 restating the case body — support already has it, and the supporting detail belongs in your own
 records, not in the thread.
 
+**A reply body is capped at 4000 characters, counted after HTML rendering** — the portal escapes
+the text and turns every newline into `<br>`, so a blank line between paragraphs costs 8, not 2.
+`cases reply` measures the rendered length and refuses over the cap (exit 2) before contacting the
+portal. If one gets through, the portal answers `portal error: ... STRING_TOO_LONG ...` and
+**inserts nothing** — the one failed write that cannot have landed, so trim and resend without
+re-reading the thread.
+
 `cases close` is one-way: the portal offers no reopen. Ask the user before closing.
 
 ## Before any outbound write
@@ -176,5 +183,5 @@ happened.
 - `0` — success
 - `1` — portal or network failure (expired session, timeout, portal error). Report it; do not retry
   blindly.
-- `2` — usage, missing config, an empty reply, a missing attachment file, or the deep-search cap.
-  Fix the command, not the connection.
+- `2` — usage, missing config, an empty or over-length reply, a missing attachment file, or the
+  deep-search cap. Fix the command, not the connection.

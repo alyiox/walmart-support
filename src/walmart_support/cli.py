@@ -33,6 +33,7 @@ from .auth import (
 )
 from .cases import (
     ACTIVITY_PAGE,
+    COMMENT_MAX_CHARS,
     Case,
     TooManyCandidates,
     close_case,
@@ -42,6 +43,7 @@ from .cases import (
     filter_cases,
     post_comment,
     pushdown_limit,
+    rendered_length,
 )
 from .config import CONFIG_PATH, Config, load_config
 from .create import (
@@ -234,6 +236,14 @@ def _cmd_cases_reply(cfg: Config, args: argparse.Namespace) -> int:
     message = Path(args.message_file).read_text() if args.message_file else args.message
     if not message.strip():
         print("refusing to post an empty reply", file=sys.stderr)
+        return 2
+    rendered = rendered_length(message)
+    if rendered > COMMENT_MAX_CHARS:
+        print(
+            f"reply renders to {rendered} characters; the portal caps a comment at "
+            f"{COMMENT_MAX_CHARS} and would post nothing",
+            file=sys.stderr,
+        )
         return 2
 
     def run(session: AuraSession) -> tuple[str, int]:

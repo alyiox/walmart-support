@@ -449,7 +449,7 @@ notes:
   every command takes --json for machine-readable output
   cases create files nothing unless --submit is given
   --portal defaults to the config's default.portal, else walmart
-  filing a case is mapped for Walmart only; Sam's Club refuses with exit 2
+  filing works on both portals; --platform and --advertisers are Walmart only
 """
 
 

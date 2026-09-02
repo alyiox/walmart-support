@@ -6,12 +6,14 @@ import pytest
 from walmart_support.aura import SessionExpired
 from walmart_support.auth import build_client, check_auth, login, read_auth_state
 from walmart_support.config import Config
+from walmart_support.portals import WALMART
 
 from .conftest import make_login_form
 
 
 def _cfg(**kw: object) -> Config:
     base = {
+        "portal": WALMART,
         "base_url": "https://portal.test",
         "username": "",
         "password": "",

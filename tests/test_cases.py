@@ -189,7 +189,7 @@ def test_detail_returns_untruncated_text_and_metadata() -> None:
 
 def test_comments_are_oldest_first_and_attributed() -> None:
     detail = fetch_case_detail(_detail_session(DETAIL), "15957474")
-    assert [c.who for c in detail.comments] == ["us", "walmart"]
+    assert [c.who for c in detail.comments] == ["us", "support"]
     assert detail.comments[0].author == "Ada Advertiser"
 
 

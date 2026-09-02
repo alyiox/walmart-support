@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -9,18 +10,26 @@ from walmart_support.cases import COMMENT_MAX_CHARS
 from walmart_support.cli import main
 
 
-@pytest.fixture
-def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., int]:
-    """Run the CLI with throwaway credentials and no config file on disk.
+def _config(tmp_path: Path, portal: str = "walmart") -> Path:
+    """A throwaway config, so a developer's real one stays out of the tests."""
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"portals": {portal: {"username": "tester@example.com", "password": "unused"}}})
+    )
+    return path
 
-    Both refusals below happen before the first request, so no portal is
-    needed; the absent path keeps a developer's real config out of the test.
+
+@pytest.fixture
+def cli(tmp_path: Path) -> Callable[..., int]:
+    """Run the CLI against a throwaway Walmart config.
+
+    Every refusal below happens before the first request, so no portal is
+    actually reached.
     """
-    monkeypatch.setenv("WALMART_SUPPORT_USERNAME", "tester@example.com")
-    monkeypatch.setenv("WALMART_SUPPORT_PASSWORD", "unused")
+    config = _config(tmp_path)
 
     def run(*argv: str) -> int:
-        return main(["--config", str(tmp_path / "absent.json"), *argv])
+        return main(["--config", str(config), *argv])
 
     return run
 
@@ -48,3 +57,34 @@ def test_reply_refuses_a_body_over_the_portal_cap(
     err = capsys.readouterr().err
     assert str(COMMENT_MAX_CHARS) in err
     assert "would post nothing" in err
+
+
+def test_close_refuses_a_portal_where_it_is_a_silent_no_op(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Refused before a session is opened. closeCaseSt answers SUCCESS on Sam's
+    # Club and leaves the status untouched, so firing it would read as a closed
+    # case to anyone who does not re-read the status afterwards.
+    code = main(
+        [
+            "--config",
+            str(_config(tmp_path, "samsclub")),
+            "--portal",
+            "samsclub",
+            "cases",
+            "close",
+            "00019047",
+        ]
+    )
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "not supported" in err
+    assert "Close Case" in err
+
+
+def test_an_unknown_portal_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["--config", str(_config(tmp_path)), "--portal", "target", "cases", "list"])
+    assert code == 2
+    assert "unknown portal" in capsys.readouterr().err

@@ -1,6 +1,16 @@
 {
-  "base_url": "https://advertisinghelp.walmart.com",
-  "username": "you@example.com",
-  "password": "your-portal-password",
-  "timeout": 60
+  "default": {
+    "portal": "walmart",
+    "timeout": 60
+  },
+  "portals": {
+    "walmart": {
+      "username": "you@example.com",
+      "password": "your-portal-password"
+    },
+    "samsclub": {
+      "username": "you@example.com",
+      "password": "your-portal-password"
+    }
+  }
 }

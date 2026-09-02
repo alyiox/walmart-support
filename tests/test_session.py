@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -10,19 +11,20 @@ import pytest
 from walmart_support import auth
 from walmart_support.aura import AuraSession, SessionExpired
 from walmart_support.config import Config
+from walmart_support.portals import WALMART
 
 from .conftest import make_login_form, make_page
 
 
 @pytest.fixture(autouse=True)
 def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = tmp_path / "session.json"
-    monkeypatch.setattr(auth, "SESSION_PATH", path)
-    return path
+    monkeypatch.setattr(auth, "SESSION_DIR", tmp_path)
+    return auth.session_path("https://portal.test")
 
 
 def _cfg(**kw: object) -> Config:
     base = {
+        "portal": WALMART,
         "base_url": "https://portal.test",
         "username": "u@example.com",
         "password": "pw",
@@ -31,27 +33,31 @@ def _cfg(**kw: object) -> Config:
     return Config(**(base | kw))  # type: ignore[arg-type]
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows chmod only toggles the read-only bit, so 0o600 reads back as 0o666",
+)
 def test_session_round_trip_is_private(isolated_cache: Path) -> None:
     client = httpx.Client(base_url="https://portal.test")
     client.cookies.set("sid", "abc", domain="portal.test")
-    auth.save_session(client)
-    assert auth.load_session() == {"sid": "abc"}
+    auth.save_session(client, isolated_cache)
+    assert auth.load_session(isolated_cache) == {"sid": "abc"}
     # live session cookies must not be world-readable
     assert stat.S_IMODE(isolated_cache.stat().st_mode) == 0o600
 
 
 def test_load_session_tolerates_missing_and_corrupt_files(isolated_cache: Path) -> None:
-    assert auth.load_session() == {}
+    assert auth.load_session(isolated_cache) == {}
     isolated_cache.write_text("not json")
-    assert auth.load_session() == {}
+    assert auth.load_session(isolated_cache) == {}
     isolated_cache.write_text(json.dumps({"cookies": "wrong type"}))
-    assert auth.load_session() == {}
+    assert auth.load_session(isolated_cache) == {}
 
 
 def test_clear_session_reports_whether_it_removed_anything(isolated_cache: Path) -> None:
     isolated_cache.write_text(json.dumps({"cookies": {"sid": "x"}}))
-    assert auth.clear_session() is True
-    assert auth.clear_session() is False
+    assert auth.clear_session(isolated_cache) is True
+    assert auth.clear_session(isolated_cache) is False
 
 
 def _transport(calls: list[str], *, cookie_is_valid: bool) -> httpx.MockTransport:
@@ -99,7 +105,7 @@ def test_stale_cache_falls_back_to_login(
     assert source == "login"
     assert "POST /login" in calls
     # a fresh session replaces the stale one
-    assert auth.load_session() != {"sid": "expired"}
+    assert auth.load_session(isolated_cache) != {"sid": "expired"}
 
 
 def test_with_session_retries_once_when_the_cache_has_died(
@@ -147,3 +153,16 @@ def test_with_session_does_not_retry_a_fresh_login(monkeypatch: pytest.MonkeyPat
     # Retrying a login that just succeeded would loop; surface the error.
     with pytest.raises(SessionExpired):
         auth.with_session(_cfg(), "/s/activity", action)
+
+
+def test_the_session_cache_is_keyed_by_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The portals are separate Salesforce orgs, so one org's sid must never be
+    # replayed against the other: it authenticates nothing while still looking
+    # like a usable cached session.
+    monkeypatch.setattr(auth, "SESSION_DIR", tmp_path)
+    walmart = auth.session_path("https://advertisinghelp.walmart.com")
+    samsclub = auth.session_path("https://advertisinghelp.samsclub.com")
+    assert walmart != samsclub
+    assert samsclub.name == "advertisinghelp.samsclub.com.json"

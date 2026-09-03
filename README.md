@@ -38,9 +38,6 @@ reply, reading each step back. Two divergences worth knowing:
   untouched — indistinguishable from a real close without re-reading. Closing is a UI action on that
   portal, and it lands the case on `Canceled` rather than `Closed`.
 
-The mechanics are in [docs/portal-internals.md](docs/portal-internals.md); the day-to-day rules are in
-`skills/walmart-support/references/samsclub.md`.
-
 ## Requirements
 
 - Python 3.13+, or [uv](https://docs.astral.sh/uv/)
@@ -83,125 +80,6 @@ Reaching for it daily, or working offline? `uv tool install walmart-support`
 puts it on `PATH` and starts faster; `walmart-support --version` reports which
 build you are on either way. Inside a clone of this repo, use `uv run
 walmart-support ...` to exercise your working tree.
-
-## Replying and attaching
-
-`cases reply` posts a comment on an existing case, and `cases attach` uploads
-files to one:
-
-```bash
-walmart-support --portal walmart cases reply 10000001 --message-file answer.txt
-walmart-support --portal walmart cases attach 10000001 ./har.json ./adgroup.json
-```
-
-Neither is gated behind a confirmation flag, unlike `cases create`: they act on
-a case you already own, with no category mapping to get wrong. `create` files a
-*new* record into the support queue, which is the thing worth a second look.
-
-Both are writes, so **do not wrap them in a retry loop.** A network error after
-the write lands looks identical to one before it, and retrying uploads the file
-or posts the comment twice — the portal has no idempotency key.
-
-The CLI only uploads: removing an attachment is a portal-page action, because
-the id an upload returns is not the id the portal's delete actions want.
-Attaching *while filing* is not supported yet. Both are portal-side quirks,
-described in [docs/portal-internals.md](docs/portal-internals.md).
-
-## Filing a case
-
-Works on both portals, with the `--advertisers` caveat noted under Status for
-Sam's Club.
-
-`cases create` prints the exact payload it would send, and the action it would
-send it to, and files nothing unless `--submit` is given. That default is
-deliberate: a case goes to a real support queue, and a mis-mapped category files
-a real but misrouted one.
-
-Categories are resolved by name against the portal's own dropdown data rather
-than hardcoded, so `categories list` shows exactly what the UI offers and both
-the UI label ("API Support") and the wizard's internal name ("API") match.
-
-`--platform` covers Display and Sponsored Search; the portal collapses Search
-onto its "Sponsored Products" ad unit, which is why a Search case shows
-Sponsored Products as its platform. Sponsored Brands and Videos are accepted
-but the portal publishes no categories for them on a partner account, and the
-error says so. Sam's Club publishes no ad-unit channels at all, so it has no
-platform picker and `--platform` is refused there rather than ignored.
-
-The action answers with the new case's number. The Walmart path is verified end
-to end — filed, replied to and closed — and so is `openCase` on Sam's Club, but
-no API case has yet been filed there through `saveApiCase` from this client, so
-treat the first one as the proof.
-
-The parameter mapping and the traps behind it are in [docs/portal-internals.md](docs/portal-internals.md),
-including one unconfirmed defect in how the portal resolves the additional form
-fields. Either way, **put anything that matters in the description body**: it is
-stored verbatim, whereas those fields are not reliably addressable.
-
-### Closing and replying
-
-```bash
-walmart-support --portal walmart cases reply 10000004 --message-file answer.txt
-walmart-support --portal walmart cases close 10000004   # New -> Closed
-```
-
-`cases close` verifies the status actually moved and exits 1 if it did not, so
-a zero exit is the only evidence that a case really closed. It is Walmart-only;
-on Sam's Club it exits 2 without contacting the portal.
-
-Why it is refused on Sam's Club, and what implementing it there would take, is
-in [docs/portal-internals.md](docs/portal-internals.md).
-
-## Sessions
-
-Each invocation is its own process, so session cookies are cached in
-`$XDG_CACHE_HOME/walmart-support/<portal-host>.json` (mode `0600`) and reused
-until the portal rejects them. Without that, every command would pay a full
-login — four requests and a Salesforce login event before doing any work; with
-it, a warm command is roughly twice as fast and logs in only when it must.
-
-The cache is keyed by host because the portals are different Salesforce orgs:
-replaying Walmart's `sid` against Sam's Club authenticates nothing while still
-looking like a usable cached session, so one shared file would make every other
-command pay a failed round trip before logging in again.
-
-A session that dies mid-command is retried once from a clean login, because
-Salesforce reports an invalid session in the middle of a request rather than up
-front. `walmart-support --portal walmart auth logout` discards the cached session.
-
-## Configuration
-
-`~/.config/walmart-support/config.json` holds one section per portal:
-
-```json
-{
-  "default": { "timeout": 60 },
-  "portals": {
-    "walmart":  { "username": "you@example.com", "password": "..." },
-    "samsclub": { "username": "you@example.com", "password": "..." }
-  }
-}
-```
-
-| Key | Required | Description |
-| --- | --- | --- |
-| `default.timeout` | no | Per-request timeout in seconds (default 60). |
-| `portals.<key>.username` | yes | Portal login email. |
-| `portals.<key>.password` | yes | Portal password. |
-| `portals.<key>.base_url` | no | Overrides the portal's own origin — a sandbox, say. |
-| `portals.<key>.timeout` | no | Overrides `default.timeout` for that portal. |
-
-Configure only the portals you use; a command naming one with no section refuses rather than
-falling back, so one org's password is never sent to the other.
-
-This file is the only source of credentials — there is no environment fallback, so which
-credentials a command used is always answerable by reading one path. `--config` points somewhere
-else, which is how CI supplies a file written from a secret.
-
-Credentials are the only way in, deliberately. A session cookie cannot be configured by hand:
-Salesforce `sid` cookies are session-scoped, expire on their own, and cannot renew themselves, so a
-configured one becomes a stale secret that fails in a way the tool can do nothing about. Sessions
-are managed by the cache below instead.
 
 ## Reading a case
 
@@ -250,6 +128,117 @@ walmart-support --portal walmart cases replies 10000001 --latest 1       # just 
 Support's acknowledgement mails quote the entire case body back, and later
 replies quote the ones before them, so an unfiltered thread is mostly repetition
 of what you already sent — `--from-support --latest 1` is usually what you want.
+
+## Replying and attaching
+
+`cases reply` posts a comment on an existing case, and `cases attach` uploads
+files to one:
+
+```bash
+walmart-support --portal walmart cases reply 10000001 --message-file answer.txt
+walmart-support --portal walmart cases attach 10000001 ./har.json ./adgroup.json
+```
+
+Neither is gated behind a confirmation flag, unlike `cases create`: they act on
+a case you already own, with no category mapping to get wrong. `create` files a
+*new* record into the support queue, which is the thing worth a second look.
+
+Both are writes, so **do not wrap them in a retry loop.** A network error after
+the write lands looks identical to one before it, and retrying uploads the file
+or posts the comment twice — the portal has no idempotency key.
+
+The CLI only uploads: removing an attachment is a portal-page action, because
+the id an upload returns is not the id the portal's delete actions want.
+Attaching *while filing* is not supported yet. Both are portal-side quirks.
+
+## Filing a case
+
+Works on both portals, with the `--advertisers` caveat noted under Status for
+Sam's Club.
+
+`cases create` prints the exact payload it would send, and the action it would
+send it to, and files nothing unless `--submit` is given. That default is
+deliberate: a case goes to a real support queue, and a mis-mapped category files
+a real but misrouted one.
+
+Categories are resolved by name against the portal's own dropdown data rather
+than hardcoded, so `categories list` shows exactly what the UI offers and both
+the UI label ("API Support") and the wizard's internal name ("API") match.
+
+`--platform` covers Display and Sponsored Search; the portal collapses Search
+onto its "Sponsored Products" ad unit, which is why a Search case shows
+Sponsored Products as its platform. Sponsored Brands and Videos are accepted
+but the portal publishes no categories for them on a partner account, and the
+error says so. Sam's Club publishes no ad-unit channels at all, so it has no
+platform picker and `--platform` is refused there rather than ignored.
+
+The action answers with the new case's number. `saveApiCase` has not yet
+completed an insert from this client, so the first Sam's Club API case filed
+through it is its own proof.
+
+**Put anything that matters in the description body**: it is stored verbatim,
+whereas the additional form fields are not reliably addressable.
+
+## Closing a case
+
+```bash
+walmart-support --portal walmart cases close 10000004   # New -> Closed
+```
+
+`cases close` verifies the status actually moved and exits 1 if it did not, so
+a zero exit is the only evidence that a case really closed. It is Walmart-only;
+on Sam's Club it exits 2 without contacting the portal.
+
+## Configuration
+
+`~/.config/walmart-support/config.json` holds one section per portal:
+
+```json
+{
+  "default": { "timeout": 60 },
+  "portals": {
+    "walmart":  { "username": "you@example.com", "password": "..." },
+    "samsclub": { "username": "you@example.com", "password": "..." }
+  }
+}
+```
+
+| Key | Required | Description |
+| --- | --- | --- |
+| `default.timeout` | no | Per-request timeout in seconds (default 60). |
+| `portals.<key>.username` | yes | Portal login email. |
+| `portals.<key>.password` | yes | Portal password. |
+| `portals.<key>.base_url` | no | Overrides the portal's own origin — a sandbox, say. |
+| `portals.<key>.timeout` | no | Overrides `default.timeout` for that portal. |
+
+Configure only the portals you use; a command naming one with no section refuses rather than
+falling back, so one org's password is never sent to the other.
+
+This file is the only source of credentials — there is no environment fallback, so which
+credentials a command used is always answerable by reading one path. `--config` points somewhere
+else, which is how CI supplies a file written from a secret.
+
+Credentials are the only way in, deliberately. A session cookie cannot be configured by hand:
+Salesforce `sid` cookies are session-scoped, expire on their own, and cannot renew themselves, so a
+configured one becomes a stale secret that fails in a way the tool can do nothing about. Sessions
+are managed by the cache below instead.
+
+## Sessions
+
+Each invocation is its own process, so session cookies are cached in
+`$XDG_CACHE_HOME/walmart-support/<portal-host>.json` (mode `0600`) and reused
+until the portal rejects them. Without that, every command would pay a full
+login — four requests and a Salesforce login event before doing any work; with
+it, a warm command is roughly twice as fast and logs in only when it must.
+
+The cache is keyed by host because the portals are different Salesforce orgs:
+replaying Walmart's `sid` against Sam's Club authenticates nothing while still
+looking like a usable cached session, so one shared file would make every other
+command pay a failed round trip before logging in again.
+
+A session that dies mid-command is retried once from a clean login, because
+Salesforce reports an invalid session in the middle of a request rather than up
+front. `walmart-support --portal walmart auth logout` discards the cached session.
 
 ## Agent plugins (Claude Code, Cursor, Codex)
 
@@ -313,4 +302,4 @@ Tests are offline: they exercise recorded page shapes and Aura envelopes through
 
 ## License
 
-[LICENSE](MIT)
+[MIT](LICENSE)

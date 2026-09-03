@@ -28,9 +28,14 @@ unsupported.
 **Sam's Club** — verified end to end by filing a real case through this CLI: create, attach and
 reply, reading each step back. Two divergences worth knowing:
 
-* `--advertisers` never reaches this org. No Sam's category declares any `Support_Form__c` records,
-  so `additionalFieldsString` goes out empty and its Apex fills Advertisers Affected from the
-  account name instead. The CLI warns; put the ids in the description body.
+* **Filing goes through a different Apex method there.** Anything under the `API` category is filed
+  with `saveApiCase`, which is what the portal's own form uses; every other category goes through
+  `openCase`. That org's `openCase` HTML-escapes the subject and body twice before storing them, so
+  the method is not interchangeable — a case filed through it reads back as `&amp;quot;App&amp;quot;`
+  where the text said `"App"`. The escaping is the portal's; the read side undoes it.
+* `--advertisers` reaches **API cases only**, where `saveApiCase` takes the ids as a parameter of
+  its own. Under any other category this org declares no field for them, so the CLI warns and drops
+  them; put the ids in the description body.
 * **`cases close` is refused.** `closeCaseSt` resolves there, answers SUCCESS, and leaves the status
   untouched — indistinguishable from a real close without re-reading. Closing is a UI action on that
   portal, and it lands the case on `Canceled` rather than `Closed`.

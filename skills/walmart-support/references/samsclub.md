@@ -11,23 +11,51 @@ each step back. Closing is the one thing that does not work; see below.
 `fetchChannels` returns an empty list and the contact form shows no platform selector. Every case
 is filed against **Sponsored Products**. Passing `--platform` exits 2 rather than being ignored.
 
-## Filing works, with one caveat
+## Two filing actions, and only one of them is safe for API cases
 
-`openCase` behaves as it does on Walmart: the case is accepted and routes to the category it was
-given (the filed case landed as `API-AdCases` / `Product Related Questions`). The account is
-resolved through `getAdvertiserInfo` rather than the contact record, which the CLI handles itself.
+This org files a case through `saveApiCase` when the level-1 category is `API`, and through
+`openCase` otherwise. That is what the portal's own form does: `AC_OpenCase` sets an `isApiCase`
+flag from the level-1 label and branches on it. Walmart declares no `saveApiCase` at all and uses
+`openCase` for everything. The CLI follows each portal's own routing, names the action it would use
+in the dry run, and carries it in `--json` as `action`.
+
+The split matters because **`openCase` on this org HTML-escapes `subject` and `problem` twice**
+before inserting the Case. A case filed through it reads back with entities inside entities —
+`&amp;quot;App&amp;quot;` where the text said `"App"`, `&amp;lt;redacted&amp;gt;` where it said
+`<redacted>` — and the portal's own agents read the same mangled text. `saveApiCase` stores the
+same bytes raw, as does Walmart's `openCase`. Nothing on this side causes it and no input avoids
+it: the escaper runs on whatever it is handed. Proven with an over-length subject, which makes the
+insert fail and echoes the value Salesforce was about to write.
+
+So a case under a **non-API** category here will still be stored escaped, because `openCase` is the
+only method that org offers for it. Nothing is lost — the text is all there, just entity-encoded —
+but do not paste that rendering back into a reply as if it were what support sees.
+
+`openCase` routes correctly either way: the earlier CLI-filed case landed as `API-AdCases` /
+`Product Related Questions`. The account is resolved through `getAdvertiserInfo` rather than the
+contact record, which the CLI handles itself.
 
 The reCAPTCHA on the portal's own form is a **client-side gate only** — it blocks the form's submit
 button, not the Apex method.
 
-**`--advertisers` does not reach this org.** No Sam's category declares any `Support_Form__c`
-records, so `additionalFieldsString` goes out as `[]` and the advertiser ids are dropped. Its Apex
-fills `Advertisers Affected`, `Contact Name` and `Contact Email` from the `guest*` parameters
-instead — which is why the filed case came back with *Advertisers Affected* set to the account
-name, rather than anything passed on the command line. The CLI warns when you pass the flag.
+## `--advertisers` reaches API cases only
 
-So **put advertiser ids in the description body.** It is stored verbatim; these fields are not
-addressable from here.
+`saveApiCase` takes the ids as `advertiserAffected`, a parameter of its own, so on an API case the
+flag now lands.
+
+Under any other category it does not. This org's `openCase` declares no `additionalFieldsString`
+parameter and no category declares any `Support_Form__c` records, so there is nowhere to put them;
+its Apex fills `Advertisers Affected`, `Contact Name` and `Contact Email` from the `guest*`
+parameters instead, which is why the first CLI-filed case came back with *Advertisers Affected* set
+to the account name. The CLI warns and drops the flag. **Put the ids in the description body** for
+those categories; it is stored verbatim.
+
+## `Onboard New API Advertiser` needs fields the CLI does not collect
+
+That issue's own form asks for company name, associated brands, vendor name and billing contact,
+and `saveApiCase` carries them in the same wrapper. The CLI sends them empty and marks the case
+with the onboarding flag the form sets, so filing one from here produces a case support has to come
+back and ask about. Use the portal UI for that issue.
 
 ## Closing is not supported
 
@@ -87,7 +115,15 @@ Nine level-1 categories, from the live portal.
 | `Feature Request/Feedback` | Access, Set-up, Optimization, Reporting, Billing, API, Other |
 | `Problem Area Not Listed` | (none) |
 
-`API` writes `API-AdCases` to the case, the same backend value Walmart uses.
+`API` writes `API-AdCases` to the case, the same backend value Walmart uses — and is the one
+level-1 category that files through `saveApiCase` rather than `openCase`.
+
+The two orgs' `openCase` methods do not take the same parameters: **19 here against Walmart's 31**,
+spelled `articleNotHelped` rather than `ArticleNotHelped`, with no `selectedAccountId`,
+`additionalFieldsString`, `product`, `geo` or `UserType`, and with `campaignName` and
+`supplierChannel` that Walmart does not declare. Aura drops undeclared parameters in silence, so
+sending Walmart's list here looked like it worked while discarding 15 of them. The CLI now sends
+each org only what it declares.
 
 ## The detail field set varies by category
 

@@ -52,6 +52,7 @@ from .create import (
     CaseDraft,
     Category,
     Identity,
+    Submission,
     fetch_category_tree,
     prepare,
     submit,
@@ -351,43 +352,56 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
         ad_unit=portal.resolve_ad_unit(args.platform),
     )
 
-    def run(session: AuraSession) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        payload = prepare(session, draft)
-        return payload, submit(session, payload) if args.submit else None
+    def run(session: AuraSession) -> tuple[Submission, dict[str, Any] | None]:
+        submission = prepare(session, draft, portal=portal)
+        return submission, submit(session, submission) if args.submit else None
 
-    payload, filed = with_session(cfg, CONTACT_PAGE, run)
+    submission, filed = with_session(cfg, CONTACT_PAGE, run)
 
-    # A portal whose categories declare no Support_Form__c records has nowhere
-    # to put the advertiser ids, so they never reach the wire. Confirmed on
-    # Sam's Club, where the filed case came back with Advertisers Affected set
-    # from the account name instead. Say so rather than dropping them quietly,
-    # and say it on --submit too, where it actually costs something.
-    dropped = "Advertisers Affected" not in str(payload.get("additionalFieldsString", ""))
-    if draft.advertisers and dropped:
+    # Where the advertiser ids can ride depends on the action: a declared form
+    # field under openCase, a parameter of their own under saveApiCase. On a
+    # portal offering neither for this category they never reach the wire, so
+    # say so rather than dropping them quietly — and say it on --submit too,
+    # where it actually costs something.
+    if draft.advertisers and not submission.carries_advertisers:
         print(
-            f"warning: {portal.label} declares no form fields for this category, so "
-            "--advertisers was dropped; put the ids in the description instead",
+            f"warning: {portal.label} has nowhere to put the advertiser ids for this "
+            "category, so --advertisers was dropped; put the ids in the description instead",
             file=sys.stderr,
         )
 
-    # The payload names the case but not its destination, so the portal is the
-    # half a reviewer cannot recover from the fields.
+    # The payload names the case but not its destination, and the two portals
+    # file through different Apex methods, so the portal and the action are the
+    # halves a reviewer cannot recover from the fields.
     if filed is None:
         if args.json:
-            print(json.dumps({"portal": portal.key, "dry_run": payload}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "portal": portal.key,
+                        "action": submission.action,
+                        "dry_run": submission.fields,
+                    },
+                    indent=2,
+                )
+            )
         else:
-            print(_describe_payload(payload))
-            print(f"\nwould file at {portal.label}.")
+            print(_describe_payload(submission.fields))
+            print(f"\nwould file at {portal.label} through {submission.action}.")
         # flush first so the notice lands after the payload, not interleaved
         sys.stdout.flush()
         print("\nnothing was filed. Re-run with --submit to file this case.", file=sys.stderr)
         return 0
 
     if args.json:
-        print(json.dumps({"portal": portal.key, "filed": filed}, indent=2))
+        print(
+            json.dumps(
+                {"portal": portal.key, "action": submission.action, "filed": filed}, indent=2
+            )
+        )
         return 0
     print(_describe_payload(filed))
-    print(f"\nfiled at {portal.label}.")
+    print(f"\nfiled at {portal.label} through {submission.action}.")
     return 0
 
 
@@ -421,7 +435,7 @@ notes:
   every command takes --json for machine-readable output
   cases create files nothing unless --submit is given
   --portal is required on every command
-  filing works on both portals; --platform and --advertisers are Walmart only
+  filing works on both portals; --platform is Walmart only
 """
 
 

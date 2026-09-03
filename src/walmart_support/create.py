@@ -2,21 +2,36 @@
 
 The portal's wizard is data-driven: ``getCaseCategoriesNew`` returns
 ``Case_Category__c`` records for each level, and the level a user lands on
-carries the form fields to collect. ``openCase`` then takes 31 flat parameters
+carries the form fields to collect. A filing action then takes flat parameters
 that restate that selection in both display and backend form.
 
 Category identifiers are looked up by name at call time rather than hardcoded,
 so the mapping follows the portal if a category is re-labelled or re-ided.
 
-**The parameter mapping below is inferred**, from the component's published
+**The parameter mapping below is inferred**, from each component's published
 method signature plus the category records — not from an observed submit. Only
 the identity and category fields are confirmed. That is why the CLI refuses to
 submit without an explicit flag: a mis-mapped category would file a real but
 misrouted case with support.
 
-It was inferred against Walmart, and Sam's Club diverges exactly where that
-would hurt — the account arrives through ``getAdvertiserInfo`` rather than the
-contact record, and no category declares ``Support_Forms__r``.
+Which action files the case is the portal's business, so a draft becomes a
+:class:`Submission` — the method name plus its parameters — rather than one
+payload shape:
+
+* Walmart: ``openCase`` with the 31 parameters it declares.
+* Sam's Club, under the API category: ``saveApiCase`` with a single wrapper
+  object, which is what that portal's own form submits there. Nothing else
+  reaches those cases correctly — ``openCase`` on that org HTML-escapes
+  ``subject`` and ``problem`` twice before the insert, and declares no
+  ``additionalFieldsString``, so the advertiser ids had nowhere to go. The
+  wrapper takes them as ``advertiserAffected``.
+* Sam's Club, every other category: ``openCase`` with the 19 parameters *it*
+  declares. Still doubly escaped, which is the portal's own bug; the read side
+  undoes it.
+
+Identity diverges too: on Sam's the account arrives through
+``getAdvertiserInfo`` rather than the contact record, and no category there
+declares ``Support_Forms__r``.
 """
 
 from __future__ import annotations
@@ -26,12 +41,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .aura import AuraError, AuraSession
-from .portals import WALMART
+from .portals import API_CATEGORY, WALMART, Portal
 
 _COMPONENT = "AC_ContactSupport"
 CONTACT_PAGE = "/s/contact?language=en_US"
 
+OPEN_CASE = "openCase"
+
 DEFAULT_GEO = "US"
+
+# The one API issue whose form collects company, billing and admin details this
+# CLI does not ask for. Sam's marks its wrapper with a flag of its own, so the
+# value is mirrored rather than assumed false.
+ONBOARDING_ISSUE = "Onboard New API Advertiser"
 
 
 def _advertiser_account(session: AuraSession) -> tuple[str, str] | None:
@@ -187,13 +209,14 @@ class CaseDraft:
     geo: str = DEFAULT_GEO
 
 
-def build_payload(
-    draft: CaseDraft, identity: Identity, selection: CategorySelection
-) -> dict[str, Any]:
-    """Assemble ``openCase`` parameters for a draft.
+def _additional_fields(draft: CaseDraft, identity: Identity, selection: CategorySelection) -> str:
+    """The ``additionalFieldsString`` value for a draft.
 
-    Every parameter the method declares is sent, empty where it does not apply,
-    because Apex binds by name and a missing one is not the same as a blank one.
+    Only fields this category actually declares are sent. The shape is a JSON
+    list of AdditionalFieldWrapper objects keyed title/value, mirroring the
+    ``Support_Form__c`` records' own ``Title__c``: Apex deserializes the string
+    into a List (an object gives "Expected '[' at the beginning of List/Set")
+    and rejects any other key by name.
     """
     # "Advertiser Account Name" is deliberately absent: it collides with
     # "Advertisers Affected" on the portal's side, which stored the account name
@@ -205,19 +228,27 @@ def build_payload(
         "Advertisers Affected": draft.advertisers,
         "Description": draft.description,
     }
-    # Only send fields this category actually declares. The shape is a JSON
-    # list of AdditionalFieldWrapper objects keyed title/value, mirroring the
-    # Support_Form__c records' own Title__c: Apex deserializes the string into a
-    # List (an object gives "Expected '[' at the beginning of List/Set") and
-    # rejects any other key by name.
     declared = set(selection.level2.form_fields)
-    additional = [
-        {"title": label, "value": value}
-        for label, value in values.items()
-        if label in declared and value
-    ]
+    return json.dumps(
+        [
+            {"title": label, "value": value}
+            for label, value in values.items()
+            if label in declared and value
+        ]
+    )
 
-    return {
+
+def _open_case_values(
+    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+) -> dict[str, Any]:
+    """Every value ``openCase`` can take, keyed by parameter name casefolded.
+
+    The two orgs declare overlapping but different parameter lists and spell one
+    of them differently, so the values live in one table and the profile's own
+    list decides which go out. Lookup is casefolded because Apex binds names
+    case-insensitively and only the org's own spelling belongs on the wire.
+    """
+    values: dict[str, Any] = {
         # Partnership__c is a lookup to a Partnership record and applies to
         # supplier/seller channels (see getPartnershipLabels), not to API
         # partners; an account id here fails with FIELD_INTEGRITY_EXCEPTION.
@@ -239,7 +270,7 @@ def build_payload(
         "backendSubDomain": selection.level2.backend_name,
         "backendSub2Domain": "",
         "backendSub3Domain": "",
-        "additionalFieldsString": json.dumps(additional),
+        "additionalFieldsString": _additional_fields(draft, identity, selection),
         "ArticleNotHelped": "",
         "caseType": "",
         "product": draft.ad_unit,
@@ -252,10 +283,115 @@ def build_payload(
         "lastLevelCategory": selection.level2.record_id,
         "documentId": [],
         "billingDisputeJson": "",
+        "campaignName": "",
+        "supplierChannel": portal.supplier_channel,
+    }
+    return {name.casefold(): value for name, value in values.items()}
+
+
+def build_payload(
+    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+) -> dict[str, Any]:
+    """Assemble ``openCase`` parameters for a draft, as ``portal`` declares them.
+
+    Every parameter the org's method declares is sent, empty where it does not
+    apply, because Apex binds by name and a missing one is not the same as a
+    blank one. Nothing it does not declare is sent, because Aura would drop it
+    in silence and the caller would never learn the value went nowhere.
+    """
+    values = _open_case_values(draft, identity, selection, portal=portal)
+    return {name: values[name.casefold()] for name in portal.open_case_params}
+
+
+def build_api_case(
+    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+) -> dict[str, Any]:
+    """Assemble the ``saveApiCase`` wrapper, mirroring the portal's own form.
+
+    Field for field what ``AC_OpenCase.createCase`` sends on its API branch,
+    including the ones only the onboarding form fills, because Apex
+    deserializes the object into one wrapper class and the form always sends
+    the whole shape.
+
+    ``problemDomain`` and ``backendDomain`` carry the *same* value here, and so
+    do ``subDomain`` and ``backendSubDomain``: the form reads both of each pair
+    off one field of the selected category record, and that field holds the
+    backend name.
+    """
+    return {
+        "companyName": "",
+        "associatedBrands": "",
+        "billingContactJobTitle": "",
+        "billingContact": "",
+        "billingCompany": "",
+        "vendorName": "",
+        "agencyName": "",
+        "subject": draft.subject,
+        "problem": draft.description,
+        "problemDomain": selection.level1.backend_name,
+        "subDomain": selection.level2.backend_name,
+        "subDomain2": "",
+        "subDomain3": "",
+        "backendDomain": selection.level1.backend_name,
+        "backendSubDomain": selection.level2.backend_name,
+        "backendSub2Domain": "",
+        "backendSub3Domain": "",
+        "lastLevelCategory": selection.level2.record_id,
+        "supplierChannel": portal.supplier_channel,
+        "isOnboardingCase": selection.level2.label.strip() == ONBOARDING_ISSUE,
+        # The one place the advertiser ids are addressable on this org.
+        "advertiserAffected": draft.advertisers,
+        "guestName": identity.contact_name,
+        "guestEmail": identity.contact_email,
+        "emails": "",
     }
 
 
-def prepare(session: AuraSession, draft: CaseDraft) -> dict[str, Any]:
+@dataclass(frozen=True)
+class Submission:
+    """One draft addressed to the action its portal files that case with."""
+
+    action: str
+    params: dict[str, Any]
+
+    @property
+    def fields(self) -> dict[str, Any]:
+        """What a reviewer should read, with a wrapper unwrapped.
+
+        ``saveApiCase`` takes its whole payload under one ``advWrapper`` key,
+        which would print as a single unreadable line in the dry run.
+        """
+        wrapper = self.params.get("advWrapper")
+        return dict(wrapper) if isinstance(wrapper, dict) else dict(self.params)
+
+    @property
+    def carries_advertisers(self) -> bool:
+        """Whether the advertiser ids a draft named actually reach the portal.
+
+        They ride a declared form field under ``openCase`` and a parameter of
+        their own under ``saveApiCase``, so neither answer generalises.
+        """
+        fields = self.fields
+        if "advertiserAffected" in fields:
+            return bool(fields["advertiserAffected"])
+        return "Advertisers Affected" in str(fields.get("additionalFieldsString", ""))
+
+
+def build_submission(
+    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+) -> Submission:
+    """Choose the action ``portal`` files this draft with, and build its params.
+
+    The level-1 label is what Sam's own form branches on, so it is what decides
+    here too.
+    """
+    if portal.api_case_action and selection.level1.label.strip() == API_CATEGORY:
+        wrapper = build_api_case(draft, identity, selection, portal=portal)
+        return Submission(portal.api_case_action, {"advWrapper": wrapper})
+    return Submission(OPEN_CASE, build_payload(draft, identity, selection, portal=portal))
+
+
+def prepare(session: AuraSession, draft: CaseDraft, *, portal: Portal) -> Submission:
     """Resolve everything needed to file ``draft``, without filing it."""
     identity = Identity.fetch(session)
     selection = resolve_categories(
@@ -265,10 +401,14 @@ def prepare(session: AuraSession, draft: CaseDraft) -> dict[str, Any]:
         ad_unit=draft.ad_unit,
         partner_channel=identity.user_type,
     )
-    return build_payload(draft, identity, selection)
+    return build_submission(draft, identity, selection, portal=portal)
 
 
-def submit(session: AuraSession, payload: dict[str, Any]) -> dict[str, Any]:
-    """File the case. Returns the portal's CaseWrapper."""
-    raw = session.apex(_COMPONENT, "openCase", payload)
+def submit(session: AuraSession, submission: Submission) -> dict[str, Any]:
+    """File the case. Returns the portal's CaseWrapper.
+
+    Both actions answer with the same wrapper shape, which is why the portal's
+    own form reads ``caseNumber`` off either without checking which it called.
+    """
+    raw = session.apex(_COMPONENT, submission.action, submission.params)
     return raw if isinstance(raw, dict) else {"result": raw}

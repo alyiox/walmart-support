@@ -15,7 +15,7 @@ the portal you are working on, because **the status vocabularies overlap only on
 Walmart can close a case:
 
 - `references/walmart.md` — status vocabulary, filing playbook, `--platform` selection
-- `references/samsclub.md` — status vocabulary, category tree, the `--advertisers` caveat
+- `references/samsclub.md` — status vocabulary, category tree, which action files a case
 - `references/verifying-fix-claims.md` — proving a claimed Ads API fix actually shipped
 
 ## Before anything
@@ -122,12 +122,22 @@ skeleton for the body.
 with `--submit`. Never put `--submit` on the first attempt, and show
 the payload to the user before you do.
 
-The preview ends `would file at <portal>.`, and `--json` carries a `portal` field. The payload
-names the case but never its destination, so that line is the only check on where it lands.
+The preview ends `would file at <portal> through <action>.`, and `--json` carries `portal` and
+`action` fields. The payload names the case but never its destination, so that line is the only
+check on where it lands — and the action is worth reading, because **the two portals do not file
+through the same Apex method**. Walmart uses `openCase` for everything. Sam's Club uses
+`saveApiCase` for anything under its `API` category, which is what its own web form does there, and
+`openCase` for every other category.
 
-On Sam's Club, `--advertisers` never reaches the portal — no category there declares form fields, so
-the ids are dropped and the CLI warns. Put them in the description body instead; see
-`references/samsclub.md`.
+That split is not cosmetic. Sam's `openCase` HTML-escapes the subject and body **twice** before
+storing them, so a case filed through it reads back as `&amp;quot;App&amp;quot;` where the text
+said `"App"` — the portal's own bug, and its agents see the mangled text too. The `saveApiCase`
+path stores the text as written. If a preview on Sam's Club says `through openCase` for a case you
+expected to be an API case, check `--category`: the escaping follows the method, not the portal.
+
+`--advertisers` on Sam's Club reaches **API cases only**, where `saveApiCase` takes the ids as a
+parameter of its own. Under any other category there is no field for them, so the CLI warns and
+drops them — put them in the description body instead. See `references/samsclub.md`.
 
 ## Replying, attaching, closing
 

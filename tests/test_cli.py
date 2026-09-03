@@ -9,6 +9,7 @@ import pytest
 from walmart_support import cli as cli_module
 from walmart_support.cases import COMMENT_MAX_CHARS
 from walmart_support.cli import main
+from walmart_support.create import Submission
 
 
 def _config(tmp_path: Path, portal: str = "walmart") -> Path:
@@ -141,9 +142,9 @@ def test_an_unknown_portal_is_a_usage_error(
 def test_the_dry_run_names_the_portal_it_would_file_at(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The payload holds the case, never its destination.
-    payload = {"subject": "Display API: 500", "problem": "..."}
-    monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (payload, None))
+    # The payload holds the case, never its destination or the action filing it.
+    submission = Submission("openCase", {"subject": "Display API: 500", "problem": "..."})
+    monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (submission, None))
     body = tmp_path / "body.txt"
     body.write_text("...")
 
@@ -163,19 +164,22 @@ def test_the_dry_run_names_the_portal_it_would_file_at(
     )
     out = capsys.readouterr()
     assert code == 0
-    assert "would file at Walmart Connect." in out.out
+    assert "would file at Walmart Connect through openCase." in out.out
     assert "nothing was filed" in out.err
 
 
 def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    payload = {"subject": "s", "problem": "p"}
+    # Sam's files its API cases through a wrapper, which the dry run unwraps
+    # rather than printing one unreadable line.
+    wrapper = {"subject": "s", "problem": "p", "advertiserAffected": ""}
+    submission = Submission("saveApiCase", {"advWrapper": wrapper})
     body = tmp_path / "body.txt"
     body.write_text("...")
 
     def run_create(filed: dict[str, object] | None) -> dict[str, object]:
-        monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (payload, filed))
+        monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (submission, filed))
         cli_module.main(
             [
                 "--config",
@@ -197,4 +201,5 @@ def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
     filed = run_create({"caseNumber": "00010001"})
 
     assert dry["portal"] == filed["portal"] == "samsclub"
-    assert dry["dry_run"] == payload
+    assert dry["action"] == filed["action"] == "saveApiCase"
+    assert dry["dry_run"] == wrapper

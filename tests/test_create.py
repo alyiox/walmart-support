@@ -10,11 +10,12 @@ from walmart_support.create import (
     CaseDraft,
     Identity,
     build_payload,
+    build_submission,
     fetch_category_tree,
     prepare,
     resolve_categories,
 )
-from walmart_support.portals import WALMART, PortalError
+from walmart_support.portals import PORTALS, SAMSCLUB, WALMART, Portal, PortalError
 
 from .conftest import make_page
 
@@ -75,10 +76,57 @@ TREE = {
                         {"Name": "Description"},
                     ]
                 },
+            },
+            {
+                "Id": "L2ONB",
+                "Front_End_Name__c": "L2_Onboard New API Advertiser_L1_API",
+                "Case_Category__c": "L2_Onboard New API Advertiser_L1_API",
+                "Case_Category_L2__r": {
+                    "Front_End_Name__c": "Onboard New API Advertiser",
+                    "Case_Category__c": "Onboard New API Advertiser",
+                },
+            },
+        ],
+        "L1BILL": [
+            {
+                "Id": "L2DISP",
+                "Front_End_Name__c": "L2_Dispute_L1_Billing",
+                "Case_Category__c": "L2_Dispute_L1_Billing",
+                "Case_Category_L2__r": {
+                    "Front_End_Name__c": "Dispute",
+                    "Case_Category__c": "Dispute",
+                },
             }
-        ]
+        ],
     },
 }
+
+
+def _samsclub_tree() -> dict[str, object]:
+    """The same tree as Sam's Club serves it.
+
+    Its level-1 label is a bare ``API`` rather than Walmart's ``API Support``,
+    which is what that portal's own form branches on, and no category there
+    declares ``Support_Form__c`` records.
+    """
+    tree = json.loads(json.dumps(TREE))
+    tree["Level1Categories"][0]["Case_Category_L1__r"]["Front_End_Name__c"] = "API"
+    for kids in tree["Level2Categories"].values():
+        for kid in kids:
+            kid.pop("Support_Forms__r", None)
+    return tree
+
+
+def _selection(portal: Portal, *, category: str = "API", issue: str = "Endpoint"):
+    tree = _samsclub_tree() if portal is SAMSCLUB else None
+    session = _session(tree=tree)
+    return session, resolve_categories(
+        session,
+        category=category,
+        issue=issue,
+        ad_unit=portal.ad_unit,
+        partner_channel="p",
+    )
 
 
 def _session(*, tree: dict[str, object] | None = None, auth: dict[str, object] | None = None):
@@ -185,9 +233,12 @@ def test_empty_tree_names_the_ad_unit_and_channel_it_tried() -> None:
 
 def test_payload_declares_every_parameter() -> None:
     draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
-    payload = prepare(_session(), draft)
+    submission = prepare(_session(), draft, portal=WALMART)
+    payload = submission.params
+    assert submission.action == "openCase"
     # Apex binds by name, so a missing parameter is not the same as a blank one.
     assert len(payload) == 31
+    assert tuple(payload) == WALMART.open_case_params
     assert payload["problemDomain"] == "API Support"
     assert payload["backendDomain"] == "API-AdCases"
     assert payload["subDomain"] == "Endpoint-specific problem"
@@ -198,7 +249,7 @@ def test_payload_declares_every_parameter() -> None:
 
 def test_additional_fields_only_carry_declared_ones() -> None:
     draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
-    payload = prepare(_session(), draft)
+    payload = prepare(_session(), draft, portal=WALMART).params
     extra = json.loads(payload["additionalFieldsString"])
     # a JSON list of title/value pairs: Apex deserializes it into a List, and
     # rejects any other key by name
@@ -217,15 +268,18 @@ def test_a_category_declaring_no_forms_drops_the_advertisers() -> None:
     # instead, so the CLI warns rather than dropping them silently.
     bare = json.loads(json.dumps(TREE))
     del bare["Level2Categories"]["L1API"][0]["Support_Forms__r"]
-    payload = prepare(
+    submission = prepare(
         _session(tree=bare),
         CaseDraft(subject="s", description="d", advertisers="12345, 67890"),
+        portal=WALMART,
     )
-    assert json.loads(payload["additionalFieldsString"]) == []
+    assert json.loads(submission.params["additionalFieldsString"]) == []
+    # which is what the CLI's warning is keyed on
+    assert submission.carries_advertisers is False
 
 
 def test_partnership_fields_are_left_empty() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d"))
+    payload = prepare(_session(), CaseDraft(subject="s", description="d"), portal=WALMART).params
     # Partnership__c is a lookup to a Partnership record, not an Account; an
     # account id there fails the insert with FIELD_INTEGRITY_EXCEPTION
     assert payload["partnershipType"] == ""
@@ -243,6 +297,7 @@ def test_search_platform_flows_through_to_the_payload() -> None:
         resolve_categories(
             _session(), category="API", issue="Endpoint", ad_unit="Display", partner_channel="p"
         ),
+        portal=WALMART,
     )
     assert payload["adUnit"] == "Sponsored Products"
     assert payload["product"] == "Sponsored Products"
@@ -255,3 +310,79 @@ def test_identity_falls_back_to_the_advertiser_lookup() -> None:
     identity = Identity.fetch(session)
     assert identity.account_id == "0018A00001EXAMPLE"
     assert identity.account_name == "Example Agency"
+
+
+def test_every_portal_declares_parameters_this_build_can_fill() -> None:
+    # The profile lists what each org's openCase declares and the builder holds
+    # the values; a parameter in one and not the other would go out missing,
+    # which Apex does not treat as blank.
+    draft = CaseDraft(subject="s", description="d")
+    identity = Identity.fetch(_session())
+    _, selection = _selection(WALMART)
+    for portal in PORTALS.values():
+        payload = build_payload(draft, identity, selection, portal=portal)
+        assert tuple(payload) == portal.open_case_params, portal.key
+
+
+def test_samsclub_files_api_cases_the_way_its_own_form_does() -> None:
+    # Its AC_OpenCase never calls openCase under the API category: openCase
+    # there escapes subject and problem twice and declares no
+    # additionalFieldsString, so this is the only path that stores the text as
+    # written and the only one the advertiser ids can ride.
+    draft = CaseDraft(subject='rejects "App"', description="body", advertisers="12345, 67890")
+    session, selection = _selection(SAMSCLUB)
+    submission = build_submission(draft, Identity.fetch(session), selection, portal=SAMSCLUB)
+
+    assert submission.action == "saveApiCase"
+    assert set(submission.params) == {"advWrapper"}
+    wrapper = submission.fields
+    assert wrapper["subject"] == 'rejects "App"'
+    assert wrapper["problem"] == "body"
+    assert wrapper["advertiserAffected"] == "12345, 67890"
+    assert submission.carries_advertisers is True
+    # The form reads both of each pair off one field of the category record.
+    assert wrapper["problemDomain"] == wrapper["backendDomain"] == "API-AdCases"
+    assert wrapper["subDomain"] == wrapper["backendSubDomain"] == "Endpoint-specific problem"
+    assert wrapper["lastLevelCategory"] == "L2EP"
+    assert wrapper["supplierChannel"] == "API"
+    assert wrapper["isOnboardingCase"] is False
+
+
+def test_the_onboarding_issue_carries_the_flag_its_form_sets() -> None:
+    session, selection = _selection(SAMSCLUB, issue="Onboard New API Advertiser")
+    submission = build_submission(
+        CaseDraft(subject="s", description="d"), Identity.fetch(session), selection, portal=SAMSCLUB
+    )
+    assert submission.fields["isOnboardingCase"] is True
+
+
+def test_samsclub_sends_only_the_openCase_parameters_it_declares() -> None:
+    # Every other category still files through openCase there, but through the
+    # 19 parameters that org declares — Aura drops the rest in silence.
+    session, selection = _selection(SAMSCLUB, category="Billing", issue="Dispute")
+    submission = build_submission(
+        CaseDraft(subject="s", description="d", advertisers="1"),
+        Identity.fetch(session),
+        selection,
+        portal=SAMSCLUB,
+    )
+
+    assert submission.action == "openCase"
+    assert tuple(submission.params) == SAMSCLUB.open_case_params
+    assert "additionalFieldsString" not in submission.params
+    assert "selectedAccountId" not in submission.params
+    # spelled as this org declares it, against Walmart's ArticleNotHelped
+    assert "articleNotHelped" in submission.params
+    assert submission.params["campaignName"] == ""
+    assert submission.params["supplierChannel"] == "API"
+    # nowhere to put them here, which is what the CLI warns about
+    assert submission.carries_advertisers is False
+
+
+def test_walmart_has_no_api_case_action_of_its_own() -> None:
+    # It declares no saveApiCase at all, so every category goes through openCase.
+    draft = CaseDraft(subject="s", description="d")
+    session, selection = _selection(WALMART)
+    submission = build_submission(draft, Identity.fetch(session), selection, portal=WALMART)
+    assert WALMART.api_case_action == ""
+    assert submission.action == "openCase"

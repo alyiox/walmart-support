@@ -130,10 +130,16 @@ through the same Apex method**. Walmart uses `openCase` for everything. Sam's Cl
 `openCase` for every other category.
 
 That split is not cosmetic. Sam's `openCase` HTML-escapes the subject and body **twice** before
-storing them, so a case filed through it reads back as `&amp;quot;App&amp;quot;` where the text
-said `"App"` — the portal's own bug, and its agents see the mangled text too. The `saveApiCase`
-path stores the text as written. If a preview on Sam's Club says `through openCase` for a case you
-expected to be an API case, check `--category`: the escaping follows the method, not the portal.
+storing them, so a case filed through it is stored as `&amp;quot;App&amp;quot;` where the text said
+`"App"`. The `saveApiCase` path stores the text as written. If a preview on Sam's Club says
+`through openCase` for a case you expected to be an API case, check `--category`: the escaping
+follows the method, not the portal.
+
+`cases get` and `cases replies` undo that escaping on read, so a case filed before this was
+understood still reads correctly. Two things they cannot fix, both of which matter when you report
+back: `cases list` shows the subject as the portal abbreviated it, which is 49 characters of
+escaped text rather than of words, and **support's own agents see the stored, mangled version** —
+so never quote our clean rendering back to them as proof of what they received.
 
 `--advertisers` on Sam's Club reaches **API cases only**, where `saveApiCase` takes the ids as a
 parameter of its own. Under any other category there is no field for them, so the CLI warns and

@@ -31,8 +31,9 @@ reply, reading each step back. Two divergences worth knowing:
 * **Filing goes through a different Apex method there.** Anything under the `API` category is filed
   with `saveApiCase`, which is what the portal's own form uses; every other category goes through
   `openCase`. That org's `openCase` HTML-escapes the subject and body twice before storing them, so
-  the method is not interchangeable — a case filed through it reads back as `&amp;quot;App&amp;quot;`
-  where the text said `"App"`. The escaping is the portal's; the read side undoes it.
+  the method is not interchangeable — a case filed through it is stored as `&amp;quot;App&amp;quot;`
+  where the text said `"App"`. The escaping is the portal's own; case reads undo it where it was
+  applied, so the cases filed before this was understood still read correctly.
 * `--advertisers` reaches **API cases only**, where `saveApiCase` takes the ids as a parameter of
   its own. Under any other category this org declares no field for them, so the CLI warns and drops
   them; put the ids in the description body.

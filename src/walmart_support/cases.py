@@ -4,6 +4,9 @@ Two actions back the portal's case views. The list returns every case in one
 shot (no server-side paging or filtering), so filtering happens here — but it
 abbreviates ``subject`` and ``description``. The detail action returns the full
 text of one case plus its conversation, so it is what ``get``/``replies`` use.
+
+Some stored text arrives escaped twice over and is undone on the way out; see
+:func:`undouble_escape`.
 """
 
 from __future__ import annotations
@@ -29,6 +32,10 @@ _DETAIL_METHOD = "getCaseData"
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"[ \t]*\n\s*\n\s*")
 
+# An entity reference that is itself escaped, i.e. text that went through an
+# HTML escaper twice: `&amp;quot;` where the case said `"`.
+_DOUBLE_ESCAPED = re.compile(r"&amp;(?:amp|quot|apos|lt|gt|nbsp|#\d+|#x[0-9a-fA-F]+);")
+
 
 @dataclass(frozen=True)
 class Case:
@@ -46,12 +53,12 @@ class Case:
     def from_record(cls, record: dict[str, Any]) -> Case:
         return cls(
             case_number=str(record.get("caseNumber", "")),
-            subject=str(record.get("subject") or ""),
+            subject=undouble_escape(str(record.get("subject") or "")),
             status=str(record.get("status") or ""),
             issue_category=str(record.get("issueCategory") or ""),
             created_date=str(record.get("createdDate") or ""),
             case_id=str(record.get("caseId") or ""),
-            description=str(record.get("description") or ""),
+            description=undouble_escape(str(record.get("description") or "")),
             origin=str(record.get("origin") or ""),
             attachments=int(record.get("attachmentNumber") or 0),
         )
@@ -97,6 +104,27 @@ def html_to_text(html: str) -> str:
     return _WS.sub("\n\n", "\n".join(lines)).strip()
 
 
+def undouble_escape(text: str) -> str:
+    """Undo a second HTML-escaping pass, where one was applied.
+
+    Sam's Club's ``openCase`` runs its escaper twice over ``subject`` and
+    ``problem`` before inserting the Case, so a case filed through it reads
+    back as ``&amp;quot;App&amp;quot;`` where the text said ``"App"``. That is
+    the portal's own bug and it cannot be fixed from this side; what can be
+    fixed is not showing it to a reader. Cases filed the way this CLI now files
+    them — and every case filed through the web form — store the text raw, so
+    the pass has to be conditional rather than blind, or it would eat the
+    single escaping in a case that legitimately quotes ``&quot;``.
+
+    The condition is an entity reference that is itself escaped, which raw
+    text only contains if it was quoting doubly-escaped markup to begin with.
+    Two passes are then undone together: text escaped twice needs exactly two.
+    """
+    if not _DOUBLE_ESCAPED.search(text):
+        return text
+    return unescape(unescape(text))
+
+
 @dataclass(frozen=True)
 class Comment:
     """One message in a case's conversation."""
@@ -108,11 +136,21 @@ class Comment:
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> Comment:
+        raw = str(record.get("textbody") or "")
+        body = html_to_text(raw)
+        # A case's first "comment" is not a stored comment: the portal
+        # synthesizes it from the Description, so it carries whatever escaping
+        # the Description has. Flattening already unescaped once, so a doubly
+        # escaped body needs exactly one more pass here. Undoing both before
+        # the tags come off would turn an escaped `<redacted>` in the text into
+        # a tag and delete it.
+        if _DOUBLE_ESCAPED.search(raw):
+            body = unescape(body)
         return cls(
             created_date=str(record.get("createdDate") or ""),
             author=str(record.get("name") or ""),
             from_advertiser=bool(record.get("isAdvertiser")),
-            body=html_to_text(str(record.get("textbody") or "")),
+            body=body,
         )
 
     @property
@@ -169,8 +207,8 @@ class CaseDetail:
         return cls(
             case_id=str(detail.get("Id") or ""),
             case_number=str(detail.get("CaseNumber") or ""),
-            subject=str(detail.get("Subject") or ""),
-            description=str(detail.get("Description") or ""),
+            subject=undouble_escape(str(detail.get("Subject") or "")),
+            description=undouble_escape(str(detail.get("Description") or "")),
             status=str(detail.get("Status") or ""),
             priority=str(detail.get("Priority") or ""),
             issue_category=str(detail.get("Issue_Category__c") or ""),

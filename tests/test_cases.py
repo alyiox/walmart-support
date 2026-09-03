@@ -22,6 +22,7 @@ from walmart_support.cases import (
     post_comment,
     pushdown_limit,
     rendered_length,
+    undouble_escape,
 )
 
 from .conftest import make_page
@@ -361,3 +362,95 @@ def test_close_case_returns_the_new_status() -> None:
     assert close_case(session, "500KW1") == "Closed"
     assert seen[0]["descriptor"] == "apex://AC_CaseDetailController/ACTION$closeCaseSt"
     assert seen[0]["params"] == {"caseID": "500KW1"}
+
+
+# What Sam's Club openCase stored for a case whose text used real quotes,
+# apostrophes, angle brackets and an ampersand: every entity escaped a second
+# time. Byte shape taken from case 00019049.
+DOUBLED = (
+    "Sandbox rejects platformType &amp;quot;App&amp;quot; "
+    "(&amp;#39;App&amp;#39;) &amp;lt;redacted&amp;gt; A &amp;amp; B"
+)
+WRITTEN = "Sandbox rejects platformType \"App\" ('App') <redacted> A & B"
+
+
+def test_doubly_escaped_text_reads_back_as_it_was_written() -> None:
+    assert undouble_escape(DOUBLED) == WRITTEN
+
+
+def test_singly_escaped_text_is_left_alone() -> None:
+    # The web form and saveApiCase store raw, so a case quoting escaped markup
+    # in a code sample means it: one pass here would eat the quoting.
+    for raw in (
+        "platformType &quot;App&quot; is rejected",
+        "a &lt;div&gt; in the response body",
+        "Retail-Link &amp; Item 360",
+        'the API wants {"platformType": "App"}',
+    ):
+        assert undouble_escape(raw) == raw
+
+
+def test_the_list_and_the_detail_agree_on_one_case() -> None:
+    # Both actions serve the same stored bytes, so a reader must not have to
+    # know which view they are looking at.
+    records: list[dict[str, object]] = [dict(RECORDS[0], subject=DOUBLED, description=DOUBLED)]
+    listed = fetch_cases(_session(records))[0]
+    assert listed.subject == WRITTEN
+    assert listed.description == WRITTEN
+
+    detail = fetch_case_detail(
+        _detail_session(
+            {
+                "detail": {"CaseNumber": "10000001", "Subject": DOUBLED, "Description": DOUBLED},
+                "comments": [],
+            }
+        ),
+        "10000001",
+    )
+    assert detail.subject == WRITTEN
+    assert detail.description == WRITTEN
+
+
+def test_a_query_matches_the_text_as_it_was_written() -> None:
+    # The point of undoing it on read: `--query` is typed the way the case was
+    # written, not the way the portal mangled it.
+    records: list[dict[str, object]] = [dict(RECORDS[0], subject=DOUBLED, description=DOUBLED)]
+    cases = fetch_cases(_session(records))
+    assert filter_cases(cases, query='platformType "App"')
+    assert filter_cases(cases, query="A & B")
+
+
+def test_the_synthesized_first_comment_is_undoubled_too() -> None:
+    # It is the Description echoed back, so it carries the same escaping —
+    # and the angle-bracketed redaction marker has to survive the flattening.
+    payload = {
+        "detail": {"CaseNumber": "10000001"},
+        "comments": [
+            {
+                "createdDate": "2026-09-02T08:32:23.000Z",
+                "name": "Ada",
+                "isAdvertiser": True,
+                "textbody": DOUBLED,
+            }
+        ],
+    }
+    body = fetch_case_detail(_detail_session(payload), "10000001").comments[0].body
+    assert body == WRITTEN
+    assert "<redacted>" in body
+
+
+def test_a_normal_reply_still_round_trips() -> None:
+    payload = {
+        "detail": {"CaseNumber": "10000001"},
+        "comments": [
+            {
+                "createdDate": "2026-09-02T09:00:00.000Z",
+                "name": "Support",
+                "isAdvertiser": False,
+                "textbody": "Use &quot;App&quot;&nbsp;<br>in the <b>body</b>.",
+            }
+        ],
+    }
+    body = fetch_case_detail(_detail_session(payload), "10000001").comments[0].body
+    # escaped once by saveCaseComment, so exactly one pass comes off
+    assert body == 'Use "App"\nin the body.'

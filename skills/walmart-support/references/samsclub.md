@@ -28,8 +28,22 @@ it: the escaper runs on whatever it is handed. Proven with an over-length subjec
 insert fail and echoes the value Salesforce was about to write.
 
 So a case under a **non-API** category here will still be stored escaped, because `openCase` is the
-only method that org offers for it. Nothing is lost — the text is all there, just entity-encoded —
-but do not paste that rendering back into a reply as if it were what support sees.
+only method that org offers for it. **`cases get` and `cases replies` undo it on read**, and only
+where it was actually applied: the trigger is an entity that is itself escaped, which text stored
+raw does not contain, so a case quoting `&quot;` in a code sample keeps its quoting. A case filed
+before this was understood now reads back byte-identical to the same text filed through the web
+form.
+
+Two things the read side cannot recover:
+
+- `cases list` shows the subject the **portal** abbreviated, and it abbreviates the escaped text —
+  49 characters of `&amp;quot;App&amp...` where a raw subject gets 49 characters of real words. The
+  row can end mid-entity. Use `cases get` for the real subject.
+- What support's own agents see is the stored text, mangled. Our clean rendering is not evidence
+  they can read it, so do not quote it back at them as if it were.
+
+The escaping also spends the field caps: 4736 characters of body became 6380 stored, against a
+32000 limit on `Description`.
 
 `openCase` routes correctly either way: the earlier CLI-filed case landed as `API-AdCases` /
 `Product Related Questions`. The account is resolved through `getAdvertiserInfo` rather than the

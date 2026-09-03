@@ -23,9 +23,8 @@ Walmart can close a case:
 Run `walmart-support --version`. If the command is missing, `uvx walmart-support ...` runs every
 command below without installing anything.
 
-Credentials live in `~/.config/walmart-support/config.json`, one section per portal — see
-`config.example.json`. That file is the only source — there is no environment fallback.
-`--config` points elsewhere.
+Credentials live in one config file per portal, and there is no environment fallback, so a
+missing-config failure is fixed by editing that file rather than by exporting anything.
 
 Every command logs in on its own and caches the session per portal, so there is nothing to run
 first. When a command exits 1 with `portal error:`, `auth check` tells you whether the credentials
@@ -37,27 +36,16 @@ rejected login.
 `walmart-support --portal <portal> auth logout` and re-running the original command clears it.
 Rule this out before reporting the portal as down.
 
-## Choosing a portal
-
-`--portal walmart` or `--portal samsclub`, before the subcommand. Required on every command.
-
-```bash
-walmart-support --portal walmart cases list       # Walmart Connect
-walmart-support --portal samsclub cases list      # Sam's Club
-```
-
-Each portal caches its own session, keyed by host, so switching does not force a re-login.
-**Say which portal you acted on** when reporting back — the write commands name it in their own
-output, and `--json` carries a `portal` field.
-
-## `--json` is global, so it goes first
+## `--portal` and `--json` go before the subcommand
 
 ```bash
 walmart-support --json --portal walmart cases list --since 30d   # correct
 walmart-support --portal walmart cases list --json               # error: unrecognized arguments
 ```
 
-`--portal` is global too, so it goes in the same place.
+Each portal caches its own session, keyed by host, so switching between them costs no re-login.
+**Say which portal you acted on** when reporting back — the write commands name it in their own
+output, and `--json` carries a `portal` field.
 
 ## Keep case text out of the conversation
 
@@ -97,20 +85,18 @@ is the user's call — re-running the failing API is not a substitute for it.
 
 ## Searching
 
-- `--query` alone matches the abbreviated subject and description that the list action returns.
-  Good for a case number or a phrase you know is in the subject.
-- `--deep` re-reads each candidate in full, replies included, at **one request per case**. Narrow
-  with `--status`/`--since` first; past 25 candidates it refuses (exit 2) instead of issuing them.
-- `--status` matches on whole words, not substrings. The vocabulary is per-portal and overlaps only
-  on `Closed`, so take it from the portal's reference file rather than reusing a filter.
-- `--limit` only shrinks the fetch when no filter is present. The portal applies it as a SOQL
-  `LIMIT` before filtering, so with a filter it trims the result afterwards and saves nothing.
+- `--deep` costs **one request per case**, so narrow with `--status`/`--since` first. Past 25
+  candidates it refuses (exit 2) rather than issuing them.
+- A plain `--query` searches text the portal has already abbreviated, so it can miss a term that
+  is in the real body. Reach for `--deep` when a search that should match does not.
+- The `--status` vocabulary is per-portal and overlaps only on `Closed`. Take it from the portal's
+  reference file rather than reusing a filter across portals.
+- `--limit` only shrinks the fetch when no filter is present, so pairing it with one saves nothing.
 
 ## Prose goes through a file, never the command line
 
-`cases reply --message-file` and `cases create --description-file` exist so a case body never
-passes through shell quoting. Write the text to a file first; do not inline multi-line prose, and
-do not try to escape it.
+Write the case body or reply to a file and pass `--description-file`/`--message-file`. Do not
+inline multi-line prose, and do not try to escape it.
 
 ## Filing a case
 
@@ -119,31 +105,22 @@ belongs in the description — is in `references/walmart.md`, and `assets/case-d
 skeleton for the body.
 
 `cases create` prints its payload and files **nothing** until you re-run the identical command
-with `--submit`. Never put `--submit` on the first attempt, and show
-the payload to the user before you do.
+with `--submit`. Never put `--submit` on the first attempt, and show the payload to the user
+before you do.
 
 The preview ends `would file at <portal> through <action>.`, and `--json` carries `portal` and
-`action` fields. The payload names the case but never its destination, so that line is the only
-check on where it lands — and the action is worth reading, because **the two portals do not file
-through the same Apex method**. Walmart uses `openCase` for everything. Sam's Club uses
-`saveApiCase` for anything under its `API` category, which is what its own web form does there, and
-`openCase` for every other category.
+`action`. Read both. The payload names the case but never its destination, and **the two portals
+file through different Apex methods**: Walmart always `openCase`, Sam's Club `saveApiCase` under
+its `API` category and `openCase` elsewhere. Only `saveApiCase` stores the text unescaped there, so
+if a Sam's preview says `through openCase` for what you meant as an API case, check `--category`.
 
-That split is not cosmetic. Sam's `openCase` HTML-escapes the subject and body **twice** before
-storing them, so a case filed through it is stored as `&amp;quot;App&amp;quot;` where the text said
-`"App"`. The `saveApiCase` path stores the text as written. If a preview on Sam's Club says
-`through openCase` for a case you expected to be an API case, check `--category`: the escaping
-follows the method, not the portal.
+That matters for how you report a Sam's case back. `cases get` and `cases replies` render the text
+correctly, but **support's own agents see the stored version**, which for an `openCase` case is
+HTML-escaped twice. Never quote our clean rendering to them as proof of what they received.
 
-`cases get` and `cases replies` undo that escaping on read, so a case filed before this was
-understood still reads correctly. Two things they cannot fix, both of which matter when you report
-back: `cases list` shows the subject as the portal abbreviated it, which is 49 characters of
-escaped text rather than of words, and **support's own agents see the stored, mangled version** —
-so never quote our clean rendering back to them as proof of what they received.
-
-`--advertisers` on Sam's Club reaches **API cases only**, where `saveApiCase` takes the ids as a
-parameter of its own. Under any other category there is no field for them, so the CLI warns and
-drops them — put them in the description body instead. See `references/samsclub.md`.
+`--advertisers` on Sam's Club reaches **API cases only**. Under any other category there is no
+field for the ids, so the CLI warns and drops them — put them in the description body instead.
+See `references/samsclub.md`.
 
 ## Replying, attaching, closing
 

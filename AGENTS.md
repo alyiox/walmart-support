@@ -100,6 +100,23 @@ Assisted-by: Claude:claude-opus-4-6 coccinelle sparse
 
 ---
 
+## Documentation
+
+Each fact has one home; repeating one across files is how they drift.
+
+* `README.md` — the front door: what it is, install, the commands, configuration
+* `docs/portal-internals.md` — how the portals behave on the wire: endpoints, actions, parameter
+  lists, and the traps found by getting them wrong
+* `skills/walmart-support/` — what an operator should do: gates, per-case request costs, per-portal
+  playbooks. This is the only one an agent loads on its own, so a rule that must change behaviour
+  belongs here rather than in the README
+* module docstrings — why the code is shaped the way it is
+
+A new portal finding goes in `docs/portal-internals.md`. Link to it from the README rather than
+restating it.
+
+---
+
 ## CLI conventions
 
 The command surface is the product. Keep it predictable.

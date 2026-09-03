@@ -28,20 +28,18 @@ unsupported.
 **Sam's Club** — verified end to end by filing a real case through this CLI: create, attach and
 reply, reading each step back. Two divergences worth knowing:
 
-* **Filing goes through a different Apex method there.** Anything under the `API` category is filed
-  with `saveApiCase`, which is what the portal's own form uses; every other category goes through
-  `openCase`. That org's `openCase` HTML-escapes the subject and body twice before storing them, so
-  the method is not interchangeable — a case filed through it is stored as `&amp;quot;App&amp;quot;`
-  where the text said `"App"`. The escaping is the portal's own; case reads undo it where it was
-  applied, so the cases filed before this was understood still read correctly.
-* `--advertisers` reaches **API cases only**, where `saveApiCase` takes the ids as a parameter of
-  its own. Under any other category this org declares no field for them, so the CLI warns and drops
-  them; put the ids in the description body.
+* **API cases file through a different Apex method there** — `saveApiCase`, which is what the
+  portal's own form uses. Its `openCase` stores the subject and body HTML-escaped twice, so the two
+  are not interchangeable. Case reads undo that escaping where it was applied, so cases filed
+  before this was understood still read correctly.
+* `--advertisers` reaches **API cases only**. Under any other category the org declares no field
+  for the ids, so the CLI warns and drops them; put them in the description body.
 * **`cases close` is refused.** `closeCaseSt` resolves there, answers SUCCESS, and leaves the status
   untouched — indistinguishable from a real close without re-reading. Closing is a UI action on that
   portal, and it lands the case on `Canceled` rather than `Closed`.
 
-See `skills/walmart-support/references/samsclub.md`.
+The mechanics are in [docs/portal-internals.md](docs/portal-internals.md); the day-to-day rules are in
+`skills/walmart-support/references/samsclub.md`.
 
 ## Requirements
 
@@ -104,24 +102,20 @@ Both are writes, so **do not wrap them in a retry loop.** A network error after
 the write lands looks identical to one before it, and retrying uploads the file
 or posts the comment twice — the portal has no idempotency key.
 
-Deletion is asymmetric and this bites: an upload returns a **ContentVersion**
-id (`068…`), while the portal's delete actions want the **ContentDocument** id
-(`069…`) and silently do nothing when handed the other. The `069` ids are
-recoverable from a case's detail payload. The CLI only uploads — remove an
-attachment from the case page in the portal.
-
-Attaching *while filing* is not supported yet: `openCase` accepts a
-`documentId` list, but `saveChunk` requires a `parentId` and the case does not
-exist yet, so it is unclear what the portal passes at that point.
+The CLI only uploads: removing an attachment is a portal-page action, because
+the id an upload returns is not the id the portal's delete actions want.
+Attaching *while filing* is not supported yet. Both are portal-side quirks,
+described in [docs/portal-internals.md](docs/portal-internals.md).
 
 ## Filing a case
 
 Works on both portals, with the `--advertisers` caveat noted under Status for
 Sam's Club.
 
-`cases create` prints the exact `openCase` payload and files nothing unless
-`--submit` is given. That default is deliberate: a case goes to a real support
-queue, and a mis-mapped category files a real but misrouted one.
+`cases create` prints the exact payload it would send, and the action it would
+send it to, and files nothing unless `--submit` is given. That default is
+deliberate: a case goes to a real support queue, and a mis-mapped category files
+a real but misrouted one.
 
 Categories are resolved by name against the portal's own dropdown data rather
 than hardcoded, so `categories list` shows exactly what the UI offers and both
@@ -134,28 +128,15 @@ but the portal publishes no categories for them on a partner account, and the
 error says so. Sam's Club publishes no ad-unit channels at all, so it has no
 platform picker and `--platform` is refused there rather than ignored.
 
-`openCase` returns the new case's number, and the whole path is verified
-end to end — filed, replied to and closed. Three things had to be right, none
-of which the method signature revealed:
+The action answers with the new case's number. The Walmart path is verified end
+to end — filed, replied to and closed — and so is `openCase` on Sam's Club, but
+no API case has yet been filed there through `saveApiCase` from this client, so
+treat the first one as the proof.
 
-* `additionalFieldsString` is a JSON **list** of `{title, value}` objects, not
-  an object. Apex deserializes it into a `List` and names any unexpected key.
-* `partnershipType`/`partnershipId` must be **empty**. `Partnership__c` is a
-  lookup to a Partnership record for supplier and seller channels, so an
-  account id there fails the insert with `FIELD_INTEGRITY_EXCEPTION`.
-* Category routing comes from the resolved level-1/level-2 pair, and a filed
-  case reports `API-AdCases` / `Endpoint-specific problem` back.
-
-> **Known defect:** the portal resolves additional fields loosely against the
-> `title` we send. On the first CLI-filed case, `Advertiser Account Name` and
-> `Advertisers Affected` collided on their shared prefix and the account name
-> was stored under the advertisers field, dropping the ids. The colliding field
-> is no longer sent, which should fix it, but that is **unconfirmed until the
-> next filing** — and the wrapper evidently carries an identifier beyond
-> `title`/`value` (its deserializer also accepts `fieldName`).
->
-> Either way, put anything that matters in the description body: it is stored
-> verbatim, whereas these fields are not reliably addressable.
+The parameter mapping and the traps behind it are in [docs/portal-internals.md](docs/portal-internals.md),
+including one unconfirmed defect in how the portal resolves the additional form
+fields. Either way, **put anything that matters in the description body**: it is
+stored verbatim, whereas those fields are not reliably addressable.
 
 ### Closing and replying
 
@@ -168,26 +149,8 @@ walmart-support --portal walmart cases close 10000004   # New -> Closed
 a zero exit is the only evidence that a case really closed. It is Walmart-only;
 on Sam's Club it exits 2 without contacting the portal.
 
-> **Open issue — `cases close` is unimplemented for Sam's Club.**
->
-> `closeCaseSt` is what closes a Walmart case. On the Sam's Club org it
-> resolves, answers `SUCCESS`, and returns the case with its status
-> **untouched** — a silent no-op, indistinguishable from a real close without
-> re-reading the case. `closeCase` and `closeCaseStatus` do not exist there.
-> The command is gated (`Portal.can_close`) rather than left to report a close
-> that never happened.
->
-> The portal's own **Close Case** button does work: case page → confirmation
-> modal → OK, landing the case on **`Canceled`**, not `Closed`. That is where
-> the org's `Canceled` cases come from, and it is the workaround to point users
-> at meanwhile.
->
-> *To resolve:* capture the Aura action behind that button. The page reloads on
-> confirm, which wiped the request log on the attempt made here, so it needs a
-> capture that survives the reload (request interception, or `Preserve log`).
-> Once the action and its parameters are known, implement it behind
-> `can_close` and decide whether `Canceled` should be reported as a close or as
-> its own outcome.
+Why it is refused on Sam's Club, and what implementing it there would take, is
+in [docs/portal-internals.md](docs/portal-internals.md).
 
 ## Sessions
 
@@ -324,22 +287,17 @@ that the skill you install always describes the CLI released alongside it.
 
 ## How it works
 
-```
-POST /login                         classic login form -> frontdoor.jsp -> session cookies
-GET  /s/contact                     scrape the Aura context (fwuid, apck, lrmc) and CSRF token
-POST /s/sfsites/aura?r=N&other....  call @AuraEnabled Apex methods through ApexActionController
-```
+Authentication goes through the classic Salesforce login form, which is the one step that is not
+Aura. Everything else is one POST to `/s/sfsites/aura` per action, carrying a framework context
+scraped on each run because it rotates with every Salesforce release. That transport is `aura.py`,
+and it is the one module to re-capture against when the contract shifts.
 
-Authentication is the one step that does *not* go through Aura: the portal still serves the classic
-login form, and the redirect it answers with is what mints the session cookies.
+Both portals answer it identically. What differs between them is org configuration, held in
+`portals.py` as a `Portal` profile: base URL, ad-unit map, which Apex method files a case, and
+whether `closeCaseSt` really closes.
 
-Aura rejects any call whose framework context does not match the deployed build, and that context
-rotates with every Salesforce release, so it is scraped on each run and never hardcoded. All of this
-lives in `aura.py`; when the contract shifts, that is the one module to re-capture against.
-
-Both portals answer this identically — same endpoint, same descriptor format, same single-use
-`eikoocnekot` token cookie. What differs between them is org configuration, and that lives in
-`portals.py` as a `Portal` profile: base URL, ad-unit map, and whether `closeCaseSt` really closes.
+The endpoints, the action-descriptor format, the single-use token cookie, each org's parameter
+lists and the traps found by getting them wrong are in [docs/portal-internals.md](docs/portal-internals.md).
 
 ## Development
 
@@ -355,4 +313,4 @@ Tests are offline: they exercise recorded page shapes and Aura envelopes through
 
 ## License
 
-MIT
+[LICENSE](MIT)

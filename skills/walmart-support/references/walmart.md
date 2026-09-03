@@ -27,8 +27,8 @@ bulk, since the mix moves:
 walmart-support --json --portal walmart cases list | jq -r '.[].status' | sort | uniq -c | sort -rn
 ```
 
-`--status` matches on whole words, so `--status "need info"` catches both `Need Info` and
-`Needs Info - Internal`, which are distinct portal statuses.
+`--status "need info"` catches both `Need Info` and `Needs Info - Internal`, which are distinct
+portal statuses with different clocks.
 
 ## Filing a case
 
@@ -37,10 +37,8 @@ One case per issue.
 1. `walmart-support --portal walmart categories list --platform <platform>` — the `--category`
    and `--issue` names must match the portal's own dropdown exactly, and they differ per
    platform.
-2. `walmart-support --portal walmart cases create ...` prints the payload and files **nothing**.
+2. `walmart-support --portal walmart cases create ...` prints the payload and files nothing.
 3. Show that payload to the user, then re-run the identical command with `--submit`.
-
-Never add `--submit` to the first attempt. It files a new record into a real support queue.
 
 Pick `--platform` by the product the failing call belongs to, not by who reported it:
 

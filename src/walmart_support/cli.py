@@ -398,8 +398,17 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
             )
 
     if "dry_run" in result:
+        # The payload carries the case but not its destination, and the portal
+        # is the half a reviewer cannot recover from the fields. Name it here,
+        # in the same shape the filed branch uses, so approving the dry run
+        # means approving the retailer too.
         payload = result["dry_run"]
-        print(json.dumps(payload, indent=2) if args.json else _describe_payload(payload))
+        if args.json:
+            print(json.dumps({"portal": portal.key, "dry_run": payload}, indent=2))
+        else:
+            print(_describe_payload(payload))
+            print()
+            print(f"would file at {portal.label}.")
         # flush first so the notice lands after the payload, not interleaved
         sys.stdout.flush()
         print("\nnothing was filed. Re-run with --submit to file this case.", file=sys.stderr)

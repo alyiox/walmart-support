@@ -125,6 +125,11 @@ The rule worth repeating here: `cases create` prints its payload and files **not
 re-run the identical command with `--submit`. Never put `--submit` on the first attempt, and show
 the payload to the user before you do.
 
+The preview ends `would file at <portal>.`, matching the `filed at <portal>.` you get after
+`--submit`; under `--json` both carry the same `portal` field. The payload itself names only the
+case, so that line is the only thing confirming which retailer's queue it is bound for — check it
+before you approve, since the fields read identically whichever portal they are headed to.
+
 On Sam's Club, `--advertisers` never reaches the portal — no category there declares form fields, so
 the ids are dropped and the CLI warns. Put them in the description body instead; see
 `references/samsclub.md`.

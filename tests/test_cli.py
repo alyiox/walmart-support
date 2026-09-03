@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from walmart_support import cli as cli_module
 from walmart_support.cases import COMMENT_MAX_CHARS
 from walmart_support.cli import main
 
@@ -135,3 +136,70 @@ def test_an_unknown_portal_is_a_usage_error(
     code = main(["--config", str(_config(tmp_path)), "--portal", "target", "cases", "list"])
     assert code == 2
     assert "unknown portal" in capsys.readouterr().err
+
+
+def test_the_dry_run_names_the_portal_it_would_file_at(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The payload holds the case, never its destination, so a reviewer reading
+    # the preview cannot tell which retailer's queue it is bound for.
+    payload = {"subject": "Display API: 500", "problem": "..."}
+    monkeypatch.setattr(
+        cli_module, "with_session", lambda cfg, page, run: {"payload": payload, "dry_run": payload}
+    )
+    body = tmp_path / "body.txt"
+    body.write_text("...")
+
+    code = cli_module.main(
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "--portal",
+            "walmart",
+            "cases",
+            "create",
+            "--subject",
+            "Display API: 500",
+            "--description-file",
+            str(body),
+        ]
+    )
+    out = capsys.readouterr()
+    assert code == 0
+    assert "would file at Walmart Connect." in out.out
+    assert "nothing was filed" in out.err
+
+
+def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Both branches answer "which portal?" the same way, so an agent parsing
+    # the preview does not have to wait for the write to learn the answer.
+    payload = {"subject": "s", "problem": "p"}
+    body = tmp_path / "body.txt"
+    body.write_text("...")
+
+    def run_create(result: dict[str, object]) -> dict[str, object]:
+        monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: result)
+        cli_module.main(
+            [
+                "--config",
+                str(_config(tmp_path, "samsclub")),
+                "--json",
+                "--portal",
+                "samsclub",
+                "cases",
+                "create",
+                "--subject",
+                "s",
+                "--description-file",
+                str(body),
+            ]
+        )
+        return json.loads(capsys.readouterr().out)
+
+    dry = run_create({"payload": payload, "dry_run": payload})
+    filed = run_create({"payload": payload, "filed": {"caseNumber": "00010001"}})
+
+    assert dry["portal"] == filed["portal"] == "samsclub"
+    assert dry["dry_run"] == payload

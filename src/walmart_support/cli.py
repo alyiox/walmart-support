@@ -11,10 +11,11 @@ import contextlib
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -49,6 +50,7 @@ from .config import CONFIG_PATH, Config, load_config
 from .create import (
     CONTACT_PAGE,
     CaseDraft,
+    Category,
     Identity,
     fetch_category_tree,
     prepare,
@@ -83,7 +85,7 @@ def _print_table(cases: Sequence[Case]) -> None:
     for case in cases:
         day = case.created_date[:10]
         subject = case.subject if len(case.subject) <= 62 else case.subject[:59] + "..."
-        flag = f" [{case.attachment_number}]" if case.attachment_number else ""
+        flag = f" [{case.attachments}]" if case.attachments else ""
         print(f"{case.case_number}  {day}  {case.status:<{status_width}}  {subject}{flag}")
     print(f"\n{len(cases)} case(s)")
 
@@ -318,113 +320,78 @@ def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     """Show the support categories the portal's own dropdown offers."""
     ad_unit = cfg.portal.resolve_ad_unit(args.platform)
 
-    def run(session: object) -> list[tuple[object, list[object]]]:
-        identity = Identity.fetch(session)  # type: ignore[arg-type]
-        return fetch_category_tree(  # type: ignore[arg-type,return-value]
-            session,  # type: ignore[arg-type]
-            ad_unit=ad_unit,
-            partner_channel=identity.user_type,
-        )
+    def run(session: AuraSession) -> list[tuple[Category, list[Category]]]:
+        identity = Identity.fetch(session)
+        return fetch_category_tree(session, ad_unit=ad_unit, partner_channel=identity.user_type)
 
-    tree = with_session(cfg, CONTACT_PAGE, run)  # type: ignore[arg-type]
+    tree = with_session(cfg, CONTACT_PAGE, run)
 
     if args.json:
-        print(
-            json.dumps(
-                [
-                    {
-                        "category": l1.label,  # type: ignore[attr-defined]
-                        "issues": [c.label for c in kids],  # type: ignore[attr-defined]
-                    }
-                    for l1, kids in tree
-                ],
-                indent=2,
-            )
-        )
+        payload = [{"category": l1.label, "issues": [c.label for c in kids]} for l1, kids in tree]
+        print(json.dumps(payload, indent=2))
         return 0
 
     print(f"support categories for {ad_unit}:\n")
     for l1, kids in tree:
-        print(f"  {l1.label}")  # type: ignore[attr-defined]
+        print(f"  {l1.label}")
         for child in kids:
-            fields = len(child.form_fields)  # type: ignore[attr-defined]
-            extra = f"  ({fields} form fields)" if fields else ""
-            print(f"     - {child.label}{extra}")  # type: ignore[attr-defined]
+            extra = f"  ({len(child.form_fields)} form fields)" if child.form_fields else ""
+            print(f"     - {child.label}{extra}")
     return 0
 
 
 def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
     portal = cfg.portal
-    if not portal.can_create:
-        # Refuse before opening a session: no dry run makes an unmapped
-        # openCase safe to send, and the failure mode is a real case in the
-        # wrong queue.
-        print(
-            f"filing a case is not mapped for {portal.label}. {portal.create_hint}",
-            file=sys.stderr,
-        )
-        return 2
-
-    description = Path(args.description_file).read_text()
     draft = CaseDraft(
         subject=args.subject,
-        description=description,
+        description=Path(args.description_file).read_text(),
         advertisers=args.advertisers or "",
         category=args.category,
         issue=args.issue,
         ad_unit=portal.resolve_ad_unit(args.platform),
     )
 
-    def run(session: object) -> dict[str, object]:
-        payload = prepare(session, draft, portal)  # type: ignore[arg-type]
-        if not args.submit:
-            return {"payload": payload, "dry_run": payload}
-        return {"payload": payload, "filed": submit(session, payload)}  # type: ignore[arg-type]
+    def run(session: AuraSession) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        payload = prepare(session, draft)
+        return payload, submit(session, payload) if args.submit else None
 
-    result = with_session(cfg, CONTACT_PAGE, run)  # type: ignore[arg-type]
+    payload, filed = with_session(cfg, CONTACT_PAGE, run)
 
     # A portal whose categories declare no Support_Form__c records has nowhere
     # to put the advertiser ids, so they never reach the wire. Confirmed on
     # Sam's Club, where the filed case came back with Advertisers Affected set
     # from the account name instead. Say so rather than dropping them quietly,
     # and say it on --submit too, where it actually costs something.
-    sent = result.get("payload")
-    if draft.advertisers and isinstance(sent, dict):
-        if "Advertisers Affected" not in str(sent.get("additionalFieldsString", "")):
-            print(
-                f"warning: {portal.label} declares no form fields for this category, so "
-                "--advertisers was dropped; put the ids in the description instead",
-                file=sys.stderr,
-            )
+    dropped = "Advertisers Affected" not in str(payload.get("additionalFieldsString", ""))
+    if draft.advertisers and dropped:
+        print(
+            f"warning: {portal.label} declares no form fields for this category, so "
+            "--advertisers was dropped; put the ids in the description instead",
+            file=sys.stderr,
+        )
 
-    if "dry_run" in result:
-        # The payload names the case but not its destination, so the portal is
-        # the half a reviewer cannot recover from the fields.
-        payload = result["dry_run"]
+    # The payload names the case but not its destination, so the portal is the
+    # half a reviewer cannot recover from the fields.
+    if filed is None:
         if args.json:
             print(json.dumps({"portal": portal.key, "dry_run": payload}, indent=2))
         else:
             print(_describe_payload(payload))
-            print()
-            print(f"would file at {portal.label}.")
+            print(f"\nwould file at {portal.label}.")
         # flush first so the notice lands after the payload, not interleaved
         sys.stdout.flush()
         print("\nnothing was filed. Re-run with --submit to file this case.", file=sys.stderr)
         return 0
 
-    filed = result["filed"]
     if args.json:
         print(json.dumps({"portal": portal.key, "filed": filed}, indent=2))
         return 0
     print(_describe_payload(filed))
-    print()
-    print(f"filed at {portal.label}.")
+    print(f"\nfiled at {portal.label}.")
     return 0
 
 
-def _describe_payload(payload: object) -> str:
-    if not isinstance(payload, dict):
-        return str(payload)
+def _describe_payload(payload: dict[str, Any]) -> str:
     interesting = {k: v for k, v in payload.items() if v not in ("", [], False, None)}
     width = max((len(k) for k in interesting), default=0)
     lines = []
@@ -479,18 +446,21 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help=f"portal to act on ({', '.join(PORTALS)})",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(required=True)
 
-    auth = sub.add_parser("auth", help="authentication helpers").add_subparsers(
-        dest="auth_command", required=True
+    auth = sub.add_parser("auth", help="authentication helpers").add_subparsers(required=True)
+    auth.add_parser(
+        "check", help="report whether the portal session is authenticated"
+    ).set_defaults(handler=_cmd_auth_check)
+    auth.add_parser("logout", help="discard the cached session").set_defaults(
+        handler=_cmd_auth_logout
     )
-    auth.add_parser("check", help="report whether the portal session is authenticated")
-    auth.add_parser("logout", help="discard the cached session")
 
     cases = sub.add_parser("cases", help="read and file support cases").add_subparsers(
-        dest="cases_command", required=True
+        required=True
     )
     listing = cases.add_parser("list", help="list cases, newest first")
+    listing.set_defaults(handler=_cmd_cases_list)
     listing.add_argument(
         "--status",
         help="match status by words: 'need info' also matches 'Needs Info - Internal'",
@@ -508,41 +478,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     detail = cases.add_parser("get", help="show one case in full")
+    detail.set_defaults(handler=_cmd_cases_get)
     detail.add_argument("case_number")
 
     attach = cases.add_parser("attach", help="upload files to an existing case")
+    attach.set_defaults(handler=_cmd_cases_attach)
     attach.add_argument("case_number")
     attach.add_argument("files", nargs="+", help="one or more files to upload")
 
     close = cases.add_parser("close", help="close a case")
+    close.set_defaults(handler=_cmd_cases_close)
     close.add_argument("case_number")
 
     reply = cases.add_parser("reply", help="post a reply on an existing case")
+    reply.set_defaults(handler=_cmd_cases_reply)
     reply.add_argument("case_number")
     message = reply.add_mutually_exclusive_group(required=True)
     message.add_argument("--message", help="reply text")
     message.add_argument("--message-file", help="file holding the reply text")
 
     replies = cases.add_parser("replies", help="show a case's conversation")
+    replies.set_defaults(handler=_cmd_cases_replies)
     replies.add_argument("case_number")
     replies.add_argument("--from-support", action="store_true", help="only messages from support")
     replies.add_argument("--latest", type=int, default=0, help="show only the last N messages")
-
-    categories = sub.add_parser(
-        "categories", help="list the portal's support categories"
-    ).add_subparsers(dest="categories_command", required=True)
-    cat_list = categories.add_parser("list", help="show categories and their issues")
-    cat_list.add_argument(
-        "--platform",
-        default=None,
-        metavar="NAME",
-        help="ad platform to list for; Walmart only, and defaults to that portal's own",
-    )
 
     create = cases.add_parser(
         "create",
         help="file a case (prints the payload unless --submit is given)",
     )
+    create.set_defaults(handler=_cmd_cases_create)
     create.add_argument("--subject", required=True)
     create.add_argument(
         "--description-file",
@@ -571,6 +536,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="actually file the case; without it the payload is only printed",
     )
+
+    categories = sub.add_parser(
+        "categories", help="list the portal's support categories"
+    ).add_subparsers(required=True)
+    cat_list = categories.add_parser("list", help="show categories and their issues")
+    cat_list.set_defaults(handler=_cmd_categories_list)
+    cat_list.add_argument(
+        "--platform",
+        default=None,
+        metavar="NAME",
+        help="ad platform to list for; Walmart only, and defaults to that portal's own",
+    )
     return parser
 
 
@@ -589,23 +566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
-    handlers = {
-        ("auth", "check"): _cmd_auth_check,
-        ("auth", "logout"): _cmd_auth_logout,
-        ("cases", "list"): _cmd_cases_list,
-        ("cases", "get"): _cmd_cases_get,
-        ("cases", "replies"): _cmd_cases_replies,
-        ("cases", "attach"): _cmd_cases_attach,
-        ("cases", "reply"): _cmd_cases_reply,
-        ("cases", "close"): _cmd_cases_close,
-        ("cases", "create"): _cmd_cases_create,
-        ("categories", "list"): _cmd_categories_list,
-    }
-    key = (str(args.command), str(getattr(args, f"{args.command}_command", "")))
-    handler = handlers.get(key)
-    if handler is None:
-        parser.error(f"unhandled command: {' '.join(str(k) for k in key if k)}")
-
+    handler: Callable[[Config, argparse.Namespace], int] = args.handler
     try:
         return handler(cfg, args)
     except BrokenPipeError:
@@ -614,10 +575,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         with contextlib.suppress(OSError):
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
-    except PortalError as exc:
-        print(f"{exc}", file=sys.stderr)
-        return 2
-    except TooManyCandidates as exc:
+    except (PortalError, TooManyCandidates) as exc:
         print(f"{exc}", file=sys.stderr)
         return 2
     except AuraError as exc:

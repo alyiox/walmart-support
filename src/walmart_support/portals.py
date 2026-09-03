@@ -2,14 +2,13 @@
 
 The Advertising Help portal is two sites, not one: Walmart Connect at
 ``advertisinghelp.walmart.com`` and Sam's Club at
-``advertisinghelp.samsclub.com``. They are separate Salesforce orgs
-(``00D0000000000AA`` and ``00D0000000000BB``) running the same custom app --
-same ``AC_*`` Apex controllers taking the same parameters, same
-``Case_Category__c`` schema, same Aura transport — so one client serves both
-and only org *configuration* differs.
+``advertisinghelp.samsclub.com``. They are separate Salesforce orgs running
+the same custom app — same ``AC_*`` Apex controllers taking the same
+parameters, same ``Case_Category__c`` schema, same Aura transport — so one
+client serves both and only org *configuration* differs.
 
 The differences below were established against both live orgs, including one
-case filed end to end on Sam's Club (00010001).
+case filed end to end on Sam's Club.
 
 That configuration is what this module holds:
 
@@ -40,7 +39,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from urllib.parse import urlparse
 
 
 class PortalError(ValueError):
@@ -88,23 +86,12 @@ class Portal:
     # The ad unit a case is filed against when no platform is named.
     ad_unit: str
     platforms: Mapping[str, str] = _NO_PLATFORMS
-    can_create: bool = True
-    # Why not, when ``can_create`` is False.
-    create_hint: str = ""
     # Whether ``closeCaseSt`` actually closes a case on this org. Sam's Club
     # resolves the action and answers SUCCESS with the record unchanged, so a
     # caller cannot tell a refusal from a success without re-reading the case.
     can_close: bool = True
     # Why not, when ``can_close`` is False.
     close_hint: str = ""
-
-    @property
-    def host(self) -> str:
-        return urlparse(self.base_url).hostname or self.key
-
-    @property
-    def has_platform_picker(self) -> bool:
-        return bool(self.platforms)
 
     def resolve_ad_unit(self, platform: str | None = None) -> str:
         """Map a ``--platform`` name onto the ad unit the portal expects."""
@@ -146,10 +133,6 @@ SAMSCLUB = Portal(
     support_label="SAM'S CLUB",
     base_url="https://advertisinghelp.samsclub.com",
     ad_unit="Sponsored Products",
-    # Confirmed by filing case 00010001 through this CLI: openCase is accepted,
-    # the case routes to API-AdCases / Product Related Questions, and the
-    # reCAPTCHA on the portal's own form is a client-side gate only.
-    can_create=True,
     # closeCaseSt resolves here and answers SUCCESS with the record untouched —
     # the status never moves. The portal's own "Close Case" button reaches some
     # other action and lands the case on Canceled rather than Closed, which is

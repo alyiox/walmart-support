@@ -153,14 +153,6 @@ class AuraSession:
         self._page_scope_id = str(uuid.uuid4())
         self._counter = 0
 
-    @property
-    def context(self) -> AuraContext:
-        return self._context
-
-    @property
-    def has_token(self) -> bool:
-        return bool(self._token)
-
     @classmethod
     def bootstrap(cls, client: httpx.Client, page_uri: str) -> AuraSession:
         """Load ``page_uri`` and build a session from that one response.
@@ -195,15 +187,6 @@ class AuraSession:
             action_hint=f"other.{component}.{method}",
             descriptor=f"apex://{controller or component + 'Controller'}/ACTION${method}",
             calling_descriptor=f"markup://c:{component}",
-            params=params or {},
-        )
-
-    def controller(self, path: str, method: str, params: dict[str, Any] | None = None) -> Any:
-        """Call a built-in Aura controller action (e.g. the login form)."""
-        return self._dispatch(
-            action_hint=f"{path.rsplit('.', 1)[-1]}.{method}",
-            descriptor=f"aura://{path}/ACTION${method}",
-            calling_descriptor="UNKNOWN",
             params=params or {},
         )
 

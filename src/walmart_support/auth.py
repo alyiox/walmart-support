@@ -73,8 +73,6 @@ _TAG = re.compile(r"<[^>]+>")
 @dataclass(frozen=True)
 class AuthState:
     authenticated: bool
-    language: str | None = None
-    page_id: str | None = None
     # What the portal said when it refused the login, so a caller can report
     # the reason instead of a bare "not authenticated".
     error: str | None = None
@@ -159,11 +157,8 @@ def read_auth_state(html: str) -> AuthState:
         config = _extract_json_object(html, match.end() - 1)
         attributes = (config or {}).get("attributes")
         if isinstance(attributes, dict):
-            return AuthState(
-                authenticated=str(attributes.get("authenticated", "")).lower() == "true",
-                language=attributes.get("language"),
-                page_id=attributes.get("pageId"),
-            )
+            authenticated = str(attributes.get("authenticated", "")).lower() == "true"
+            return AuthState(authenticated=authenticated)
     # Fall back to the raw attribute so a markup change degrades to a guess
     # rather than a crash.
     return AuthState(authenticated='"authenticated":"true"' in html)

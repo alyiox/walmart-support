@@ -25,7 +25,6 @@ def _cfg(**kw: object) -> Config:
 def test_reads_authenticated_attribute(member_page: str, guest_page: str) -> None:
     assert read_auth_state(member_page).authenticated is True
     assert read_auth_state(guest_page).authenticated is False
-    assert read_auth_state(member_page).language == "en_US"
 
 
 def test_falls_back_when_aura_config_unparseable() -> None:

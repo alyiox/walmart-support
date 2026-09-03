@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from walmart_support.auth import session_path
 from walmart_support.portals import (
     PORTALS,
     SAMSCLUB,
@@ -18,8 +19,8 @@ def test_both_portals_are_reachable_by_key() -> None:
 def test_the_two_portals_are_distinct_hosts() -> None:
     # They are separate Salesforce orgs, which is what makes a per-host session
     # cache necessary rather than tidy.
-    assert WALMART.host == "advertisinghelp.walmart.com"
-    assert SAMSCLUB.host == "advertisinghelp.samsclub.com"
+    assert WALMART.base_url != SAMSCLUB.base_url
+    assert session_path(WALMART.base_url) != session_path(SAMSCLUB.base_url)
 
 
 def test_brand_spellings_resolve() -> None:
@@ -35,7 +36,7 @@ def test_an_unknown_portal_lists_the_valid_ones() -> None:
 
 
 def test_walmart_publishes_a_platform_picker() -> None:
-    assert WALMART.has_platform_picker
+    assert WALMART.platforms
     assert WALMART.resolve_ad_unit("shop-builder") == "ShopBuilder"
     assert WALMART.resolve_ad_unit(None) == "Display"
 
@@ -43,7 +44,7 @@ def test_walmart_publishes_a_platform_picker() -> None:
 def test_samsclub_has_no_platform_picker() -> None:
     # fetchChannels answers with an empty list and the contact form shows no
     # picker; every case is filed against Sponsored Products.
-    assert not SAMSCLUB.has_platform_picker
+    assert not SAMSCLUB.platforms
     assert SAMSCLUB.resolve_ad_unit(None) == "Sponsored Products"
     assert SAMSCLUB.resolve_ad_unit("") == "Sponsored Products"
 
@@ -51,13 +52,6 @@ def test_samsclub_has_no_platform_picker() -> None:
 def test_naming_a_platform_on_samsclub_is_refused() -> None:
     with pytest.raises(PortalError, match="no platform picker"):
         SAMSCLUB.resolve_ad_unit("display")
-
-
-def test_both_portals_can_file_a_case() -> None:
-    # Sam's Club creation was confirmed by filing case 00010001 through the CLI:
-    # openCase is accepted and routes to the category it was given.
-    assert WALMART.can_create
-    assert SAMSCLUB.can_create
 
 
 def test_only_walmart_can_close_a_case() -> None:

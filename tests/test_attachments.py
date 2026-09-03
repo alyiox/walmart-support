@@ -13,7 +13,6 @@ from walmart_support.attachments import (
     CHUNK_CHARS,
     chunk,
     content_type_for,
-    document_ids,
     upload_file,
 )
 from walmart_support.aura import AuraError, AuraSession
@@ -89,13 +88,3 @@ def test_empty_parent_is_refused_before_any_request(tmp_path: Path) -> None:
     with pytest.raises(AuraError, match="parentId is required"):
         upload_file(_session(calls, []), "", path)
     assert calls == []
-
-
-def test_document_ids_finds_the_delete_ids_not_the_upload_ones() -> None:
-    payload = {
-        "attachmentNumber": 2,
-        "detail": {"files": "0694M00000EXAMPL1 and 0694M00000EXAMPL2"},
-        "uploaded": "0684M00000EXAMPLE",
-    }
-    # deletion needs the 069 ContentDocument ids, never the 068 ContentVersion
-    assert document_ids(payload) == ["0694M00000EXAMPL1", "0694M00000EXAMPL2"]

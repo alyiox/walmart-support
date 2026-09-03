@@ -96,7 +96,7 @@ def test_omitting_the_portal_is_a_usage_error(
 
 
 def test_the_config_cannot_select_a_portal(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A default.portal left in an older config must not redirect anything.
     path = tmp_path / "config.json"
@@ -113,8 +113,10 @@ def test_the_config_cannot_select_a_portal(
         main(["--config", str(path), "cases", "list"])
     assert exit_info.value.code == 2
 
-    # Naming Walmart reaches Walmart, not the portal the stale key names.
-    assert main(["--config", str(path), "--portal", "walmart", "cases", "close", "1"]) == 1
+    # Naming Walmart reaches Walmart, not the portal the stale key names: the
+    # close gate is Walmart's, so the command gets as far as the session.
+    monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: ("New", "Closed"))
+    assert main(["--config", str(path), "--portal", "walmart", "cases", "close", "1"]) == 0
     assert "samsclub" not in capsys.readouterr().err
 
 
@@ -141,9 +143,7 @@ def test_the_dry_run_names_the_portal_it_would_file_at(
 ) -> None:
     # The payload holds the case, never its destination.
     payload = {"subject": "Display API: 500", "problem": "..."}
-    monkeypatch.setattr(
-        cli_module, "with_session", lambda cfg, page, run: {"payload": payload, "dry_run": payload}
-    )
+    monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (payload, None))
     body = tmp_path / "body.txt"
     body.write_text("...")
 
@@ -174,8 +174,8 @@ def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
     body = tmp_path / "body.txt"
     body.write_text("...")
 
-    def run_create(result: dict[str, object]) -> dict[str, object]:
-        monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: result)
+    def run_create(filed: dict[str, object] | None) -> dict[str, object]:
+        monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: (payload, filed))
         cli_module.main(
             [
                 "--config",
@@ -193,8 +193,8 @@ def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
         )
         return json.loads(capsys.readouterr().out)
 
-    dry = run_create({"payload": payload, "dry_run": payload})
-    filed = run_create({"payload": payload, "filed": {"caseNumber": "00010001"}})
+    dry = run_create(None)
+    filed = run_create({"caseNumber": "00010001"})
 
     assert dry["portal"] == filed["portal"] == "samsclub"
     assert dry["dry_run"] == payload

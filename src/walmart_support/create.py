@@ -16,9 +16,7 @@ misrouted case with support.
 
 It was inferred against Walmart, and Sam's Club diverges exactly where that
 would hurt — the account arrives through ``getAdvertiserInfo`` rather than the
-contact record, and no category declares ``Support_Forms__r`` — so
-:func:`prepare` refuses outright on a portal whose profile says creation is
-unmapped.
+contact record, and no category declares ``Support_Forms__r``.
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .aura import AuraError, AuraSession
-from .portals import WALMART, Portal, PortalError
+from .portals import WALMART
 
 _COMPONENT = "AC_ContactSupport"
 CONTACT_PAGE = "/s/contact?language=en_US"
@@ -257,14 +255,8 @@ def build_payload(
     }
 
 
-def prepare(session: AuraSession, draft: CaseDraft, portal: Portal) -> dict[str, Any]:
-    """Resolve everything needed to file ``draft``, without filing it.
-
-    Refuses on a portal whose ``openCase`` mapping has not been confirmed: the
-    failure mode there is a real but misrouted case, which no dry run catches.
-    """
-    if not portal.can_create:
-        raise PortalError(f"filing a case is not mapped for {portal.label}. {portal.create_hint}")
+def prepare(session: AuraSession, draft: CaseDraft) -> dict[str, Any]:
+    """Resolve everything needed to file ``draft``, without filing it."""
     identity = Identity.fetch(session)
     selection = resolve_categories(
         session,

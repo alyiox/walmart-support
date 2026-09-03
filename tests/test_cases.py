@@ -18,7 +18,6 @@ from walmart_support.cases import (
     fetch_case_detail,
     fetch_cases,
     filter_cases,
-    find_case,
     html_to_text,
     post_comment,
     pushdown_limit,
@@ -83,7 +82,7 @@ def test_fetch_sorts_newest_first() -> None:
 
 def test_record_mapping_handles_missing_optional_fields() -> None:
     case = Case.from_record({"caseNumber": "1", "subject": None})
-    assert case.subject == "" and case.attachment_number == 0 and case.description == ""
+    assert case.subject == "" and case.attachments == 0 and case.description == ""
 
 
 def test_non_list_return_value_is_tolerated() -> None:
@@ -106,12 +105,6 @@ def test_query_matches_subject_or_description() -> None:
     cases = fetch_cases(_session(RECORDS))
     assert len(filter_cases(cases, query="ARCHIVED")) == 2
     assert [c.case_number for c in filter_cases(cases, query="111111")] == ["10000001"]
-
-
-def test_find_case_by_number() -> None:
-    cases = fetch_cases(_session(RECORDS))
-    assert find_case(cases, "10000003") is not None
-    assert find_case(cases, "99999999") is None
 
 
 def test_created_day_parses_zulu_timestamps() -> None:

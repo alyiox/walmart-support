@@ -1,10 +1,9 @@
 # Sam's Club portal
 
-`--portal samsclub`. A separate Salesforce org (`00D0000000000BB`) from Walmart's
-(`00D0000000000AA`), running the same app: same Aura transport, same `AC_*` Apex controllers, same
-`Case_Category__c` schema.
+`--portal samsclub`. A separate Salesforce org from Walmart's, running the same app: same Aura
+transport, same `AC_*` Apex controllers, same `Case_Category__c` schema.
 
-Verified end to end by filing case `00010001` through this CLI — create, attach, reply — and reading
+Verified end to end by filing a real case through this CLI — create, attach, reply — and reading
 each step back. Closing is the one thing that does not work; see below.
 
 ## No platform picker
@@ -15,8 +14,8 @@ is filed against **Sponsored Products**. Passing `--platform` exits 2 rather tha
 ## Filing works, with one caveat
 
 `openCase` behaves as it does on Walmart: the case is accepted and routes to the category it was
-given (`00010001` landed as `API-AdCases` / `Product Related Questions`). The account is resolved
-through `getAdvertiserInfo` rather than the contact record, which the CLI handles on its own.
+given (the filed case landed as `API-AdCases` / `Product Related Questions`). The account is
+resolved through `getAdvertiserInfo` rather than the contact record, which the CLI handles itself.
 
 The reCAPTCHA on the portal's own form is a **client-side gate only** — it blocks the form's submit
 button, not the Apex method.
@@ -24,8 +23,8 @@ button, not the Apex method.
 **`--advertisers` does not reach this org.** No Sam's category declares any `Support_Form__c`
 records, so `additionalFieldsString` goes out as `[]` and the advertiser ids are dropped. Its Apex
 fills `Advertisers Affected`, `Contact Name` and `Contact Email` from the `guest*` parameters
-instead — which is why `00010001` came back with *Advertisers Affected: Example Agency*, the account name,
-rather than anything passed on the command line. The CLI warns when you pass the flag.
+instead — which is why the filed case came back with *Advertisers Affected* set to the account
+name, rather than anything passed on the command line. The CLI warns when you pass the flag.
 
 So **put advertiser ids in the description body.** It is stored verbatim; these fields are not
 addressable from here.
@@ -93,9 +92,9 @@ Nine level-1 categories, from the live portal.
 ## The detail field set varies by category
 
 `getCaseData` returns different fields depending on the case's category, so a blank column is not
-evidence of anything. An API case (`00010001`) carries `Issue_Category__c`, `Sub_Category_1__c`,
+evidence of anything. An API case carries `Issue_Category__c`, `Sub_Category_1__c`,
 `Advertisers_Affected__c` and `Sponsored_Ad_Contact_{Name,Email}__c`. An onboarding case
-(`00010002`) carries none of those and instead has `Account_Admin_*`, `Company_Name_Supplier__c`,
+carries none of those and instead has `Account_Admin_*`, `Company_Name_Supplier__c`,
 `Agency_Name__c` and `Vendor_Number__c`, leaving `cases get` to render *issue category* and *sub
 category* empty — exactly as the portal's own UI does for that case.
 

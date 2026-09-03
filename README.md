@@ -14,9 +14,9 @@ in the UI is one POST to `/s/sfsites/aura` naming an `@AuraEnabled` Apex method,
 scriptable — which matters, because submitting a case body through a headless browser is slow and,
 in some environments, unreliable enough to leave you unsure whether a case was actually filed.
 
-The two are separate Salesforce orgs (`00D0000000000AA` and `00D0000000000BB`) running the same
-custom app: same `AC_*` Apex controllers taking the same parameters, same `Case_Category__c` schema.
-So this is one client pointed at two tenants, not two clients. `--portal` picks one.
+The two are separate Salesforce orgs running the same custom app: same `AC_*` Apex controllers
+taking the same parameters, same `Case_Category__c` schema. So this is one client pointed at two
+tenants, not two clients. `--portal` picks one.
 
 ## Status
 
@@ -25,7 +25,7 @@ files, closing, and filing new cases. Each Aura payload was captured from the po
 against a real case, so treat behaviour outside the documented commands as unmapped rather than
 unsupported.
 
-**Sam's Club** — verified end to end by filing case `00010001` through this CLI: create, attach and
+**Sam's Club** — verified end to end by filing a real case through this CLI: create, attach and
 reply, reading each step back. Two divergences worth knowing:
 
 * `--advertisers` never reaches this org. No Sam's category declares any `Support_Form__c` records,
@@ -101,8 +101,8 @@ or posts the comment twice — the portal has no idempotency key.
 Deletion is asymmetric and this bites: an upload returns a **ContentVersion**
 id (`068…`), while the portal's delete actions want the **ContentDocument** id
 (`069…`) and silently do nothing when handed the other. The `069` ids are
-recoverable from a case's detail payload; `attachments.document_ids()` extracts
-them.
+recoverable from a case's detail payload. The CLI only uploads — remove an
+attachment from the case page in the portal.
 
 Attaching *while filing* is not supported yet: `openCase` accepts a
 `documentId` list, but `saveChunk` requires a `parentId` and the case does not
@@ -319,10 +319,13 @@ that the skill you install always describes the CLI released alongside it.
 ## How it works
 
 ```
-GET  /s/contact                     scrape the Aura context (fwuid, apck, lrmc, markup hash)
-POST /s/sfsites/aura?r=N&...login   authenticate via LightningLoginFormController
+POST /login                         classic login form -> frontdoor.jsp -> session cookies
+GET  /s/contact                     scrape the Aura context (fwuid, apck, lrmc) and CSRF token
 POST /s/sfsites/aura?r=N&other....  call @AuraEnabled Apex methods through ApexActionController
 ```
+
+Authentication is the one step that does *not* go through Aura: the portal still serves the classic
+login form, and the redirect it answers with is what mints the session cookies.
 
 Aura rejects any call whose framework context does not match the deployed build, and that context
 rotates with every Salesforce release, so it is scraped on each run and never hardcoded. All of this
@@ -330,7 +333,7 @@ lives in `aura.py`; when the contract shifts, that is the one module to re-captu
 
 Both portals answer this identically — same endpoint, same descriptor format, same single-use
 `eikoocnekot` token cookie. What differs between them is org configuration, and that lives in
-`portals.py` as a `Portal` profile: base URL, ad-unit map, and whether `openCase` is mapped.
+`portals.py` as a `Portal` profile: base URL, ad-unit map, and whether `closeCaseSt` really closes.
 
 ## Development
 

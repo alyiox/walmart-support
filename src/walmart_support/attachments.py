@@ -9,14 +9,13 @@ Deletion is asymmetric and worth knowing about: ``saveChunk`` returns a
 ContentVersion id (``068…``), while ``deleteAttachments`` and
 ``deleteContentDoc`` both want the ContentDocument id (``069…``) and quietly do
 nothing when handed the other. The ContentDocument id is recoverable from
-``getCaseData``.
+``getCaseData``, but nothing here deletes: the CLI only uploads.
 """
 
 from __future__ import annotations
 
 import base64
 import mimetypes
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,9 +29,6 @@ _UPLOAD_METHOD = "saveChunk"
 CHUNK_CHARS = 750_000
 
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
-
-# ContentDocument ids, as embedded in a case's detail payload.
-_DOCUMENT_ID = re.compile(r"\b(069[A-Za-z0-9]{12,15})\b")
 
 
 @dataclass(frozen=True)
@@ -89,14 +85,3 @@ def upload_file(
         byte_size=len(raw),
         content_version_id=file_id,
     )
-
-
-def document_ids(payload: object) -> list[str]:
-    """Pull ContentDocument ids out of a raw case payload.
-
-    Needed because the id required to delete an attachment is not the one the
-    upload hands back.
-    """
-    import json
-
-    return sorted(set(_DOCUMENT_ID.findall(json.dumps(payload))))

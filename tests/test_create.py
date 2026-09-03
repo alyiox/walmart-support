@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 
 import httpx
 import pytest
@@ -15,7 +14,7 @@ from walmart_support.create import (
     prepare,
     resolve_categories,
 )
-from walmart_support.portals import SAMSCLUB, WALMART, PortalError
+from walmart_support.portals import WALMART, PortalError
 
 from .conftest import make_page
 
@@ -186,7 +185,7 @@ def test_empty_tree_names_the_ad_unit_and_channel_it_tried() -> None:
 
 def test_payload_declares_every_parameter() -> None:
     draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
-    payload = prepare(_session(), draft, WALMART)
+    payload = prepare(_session(), draft)
     # Apex binds by name, so a missing parameter is not the same as a blank one.
     assert len(payload) == 31
     assert payload["problemDomain"] == "API Support"
@@ -199,7 +198,7 @@ def test_payload_declares_every_parameter() -> None:
 
 def test_additional_fields_only_carry_declared_ones() -> None:
     draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
-    payload = prepare(_session(), draft, WALMART)
+    payload = prepare(_session(), draft)
     extra = json.loads(payload["additionalFieldsString"])
     # a JSON list of title/value pairs: Apex deserializes it into a List, and
     # rejects any other key by name
@@ -221,13 +220,12 @@ def test_a_category_declaring_no_forms_drops_the_advertisers() -> None:
     payload = prepare(
         _session(tree=bare),
         CaseDraft(subject="s", description="d", advertisers="12345, 67890"),
-        WALMART,
     )
     assert json.loads(payload["additionalFieldsString"]) == []
 
 
 def test_partnership_fields_are_left_empty() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d"), WALMART)
+    payload = prepare(_session(), CaseDraft(subject="s", description="d"))
     # Partnership__c is a lookup to a Partnership record, not an Account; an
     # account id there fails the insert with FIELD_INTEGRITY_EXCEPTION
     assert payload["partnershipType"] == ""
@@ -248,16 +246,6 @@ def test_search_platform_flows_through_to_the_payload() -> None:
     )
     assert payload["adUnit"] == "Sponsored Products"
     assert payload["product"] == "Sponsored Products"
-
-
-def test_prepare_refuses_a_portal_whose_open_case_is_unmapped() -> None:
-    # The gate is a property of the profile, not of one retailer: a portal that
-    # declares its openCase unmapped must refuse before anything reaches the
-    # wire, because the failure mode is a real but misrouted case that no dry
-    # run catches.
-    unmapped = replace(SAMSCLUB, can_create=False, create_hint="file it by hand")
-    with pytest.raises(PortalError, match="not mapped"):
-        prepare(_session(), CaseDraft(subject="s", description="d"), unmapped)
 
 
 def test_identity_falls_back_to_the_advertiser_lookup() -> None:

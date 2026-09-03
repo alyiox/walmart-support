@@ -40,7 +40,7 @@ class Case:
     case_id: str = ""
     description: str = ""
     origin: str = ""
-    attachment_number: int = 0
+    attachments: int = 0
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> Case:
@@ -53,7 +53,7 @@ class Case:
             case_id=str(record.get("caseId") or ""),
             description=str(record.get("description") or ""),
             origin=str(record.get("origin") or ""),
-            attachment_number=int(record.get("attachmentNumber") or 0),
+            attachments=int(record.get("attachmentNumber") or 0),
         )
 
     @property
@@ -73,7 +73,7 @@ class Case:
             "status": self.status,
             "issue_category": self.issue_category,
             "subject": self.subject,
-            "attachments": self.attachment_number,
+            "attachments": self.attachments,
             "origin": self.origin,
             "description": self.description,
         }
@@ -344,7 +344,3 @@ def deep_filter(
         if needle in haystack.casefold():
             matched.append(case)
     return matched
-
-
-def find_case(cases: list[Case], case_number: str) -> Case | None:
-    return next((c for c in cases if c.case_number == case_number), None)

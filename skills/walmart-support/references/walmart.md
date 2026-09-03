@@ -1,7 +1,7 @@
 # Walmart Connect portal
 
-`--portal walmart`, named on every command. The portal `--platform` applies to, and the only
-one `cases close` works against.
+`--portal walmart`. The portal `--platform` applies to, and the only one `cases close` works
+against.
 
 ## Status vocabulary
 

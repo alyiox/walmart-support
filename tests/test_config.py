@@ -28,7 +28,6 @@ def _both(**default: Any) -> dict[str, Any]:
 
 
 def test_an_empty_portal_refuses_rather_than_guessing(tmp_path: Path) -> None:
-    # A portal is a retailer, so there is nothing sensible to fall back to.
     # The CLI makes --portal required; this is the guard for other callers.
     with pytest.raises(RuntimeError, match="no portal named"):
         load_config(_write(tmp_path, _both()), portal="")
@@ -49,8 +48,7 @@ def test_the_argument_alone_selects_a_portal(tmp_path: Path) -> None:
 
 
 def test_a_portal_key_in_the_config_does_not_select_anything(tmp_path: Path) -> None:
-    # default.portal was removed; a leftover one from an old config must not
-    # quietly override the flag.
+    # A default.portal left in an older config must not override the flag.
     cfg = load_config(_write(tmp_path, _both(portal="samsclub")), portal="walmart")
     assert cfg.portal is WALMART
     assert cfg.username == "w@example.com"

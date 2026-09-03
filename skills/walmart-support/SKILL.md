@@ -39,19 +39,16 @@ Rule this out before reporting the portal as down.
 
 ## Choosing a portal
 
-`--portal walmart` or `--portal samsclub`, before the subcommand. **Required on every command** —
-nothing in the config selects a portal, so a command that omits it exits 2 rather than reach a
-retailer nobody named.
+`--portal walmart` or `--portal samsclub`, before the subcommand. Required on every command.
 
 ```bash
 walmart-support --portal walmart cases list       # Walmart Connect
 walmart-support --portal samsclub cases list      # Sam's Club
-walmart-support cases list                        # error: the following arguments are required: --portal
 ```
 
-Each portal caches its own session, keyed by host, so switching does not force a re-login. Every
-command names its portal, so **say which one you acted on** when reporting back — the write
-commands name it in their own output, and `--json` carries a `portal` field.
+Each portal caches its own session, keyed by host, so switching does not force a re-login.
+**Say which portal you acted on** when reporting back — the write commands name it in their own
+output, and `--json` carries a `portal` field.
 
 ## `--json` is global, so it goes first
 
@@ -121,14 +118,12 @@ Works on both portals. The full Walmart playbook — category and issue selectio
 belongs in the description — is in `references/walmart.md`, and `assets/case-description.md` is the
 skeleton for the body.
 
-The rule worth repeating here: `cases create` prints its payload and files **nothing** until you
-re-run the identical command with `--submit`. Never put `--submit` on the first attempt, and show
+`cases create` prints its payload and files **nothing** until you re-run the identical command
+with `--submit`. Never put `--submit` on the first attempt, and show
 the payload to the user before you do.
 
-The preview ends `would file at <portal>.`, matching the `filed at <portal>.` you get after
-`--submit`; under `--json` both carry the same `portal` field. The payload itself names only the
-case, so that line is the only thing confirming which retailer's queue it is bound for — check it
-before you approve, since the fields read identically whichever portal they are headed to.
+The preview ends `would file at <portal>.`, and `--json` carries a `portal` field. The payload
+names the case but never its destination, so that line is the only check on where it lands.
 
 On Sam's Club, `--advertisers` never reaches the portal — no category there declares form fields, so
 the ids are dropped and the CLI warns. Put them in the description body instead; see

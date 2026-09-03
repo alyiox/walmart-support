@@ -86,8 +86,8 @@ def test_close_refuses_a_portal_where_it_is_a_silent_no_op(
 def test_omitting_the_portal_is_a_usage_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # There is no default portal anywhere, so a command that does not name one
-    # cannot run. argparse refuses it, which is exit 2 like every usage fault.
+    # argparse refuses this before the config loads, so it raises SystemExit
+    # rather than returning a code.
     with pytest.raises(SystemExit) as exit_info:
         main(["--config", str(_config(tmp_path)), "cases", "list"])
 
@@ -98,8 +98,7 @@ def test_omitting_the_portal_is_a_usage_error(
 def test_the_config_cannot_select_a_portal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # A default.portal left over from an older config is inert: the flag is
-    # the only thing that chooses, so the stale key cannot redirect a write.
+    # A default.portal left in an older config must not redirect anything.
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps(
@@ -114,7 +113,7 @@ def test_the_config_cannot_select_a_portal(
         main(["--config", str(path), "cases", "list"])
     assert exit_info.value.code == 2
 
-    # And naming Walmart reaches Walmart, not the portal the stale key names.
+    # Naming Walmart reaches Walmart, not the portal the stale key names.
     assert main(["--config", str(path), "--portal", "walmart", "cases", "close", "1"]) == 1
     assert "samsclub" not in capsys.readouterr().err
 
@@ -122,7 +121,6 @@ def test_the_config_cannot_select_a_portal(
 def test_the_flag_alone_selects_a_portal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Nothing in the config chooses a portal, so the flag has to be enough.
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"portals": {"samsclub": {"username": "u", "password": "p"}}}))
 
@@ -141,8 +139,7 @@ def test_an_unknown_portal_is_a_usage_error(
 def test_the_dry_run_names_the_portal_it_would_file_at(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The payload holds the case, never its destination, so a reviewer reading
-    # the preview cannot tell which retailer's queue it is bound for.
+    # The payload holds the case, never its destination.
     payload = {"subject": "Display API: 500", "problem": "..."}
     monkeypatch.setattr(
         cli_module, "with_session", lambda cfg, page, run: {"payload": payload, "dry_run": payload}
@@ -173,8 +170,6 @@ def test_the_dry_run_names_the_portal_it_would_file_at(
 def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Both branches answer "which portal?" the same way, so an agent parsing
-    # the preview does not have to wait for the write to learn the answer.
     payload = {"subject": "s", "problem": "p"}
     body = tmp_path / "body.txt"
     body.write_text("...")

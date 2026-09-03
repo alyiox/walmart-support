@@ -398,10 +398,8 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
             )
 
     if "dry_run" in result:
-        # The payload carries the case but not its destination, and the portal
-        # is the half a reviewer cannot recover from the fields. Name it here,
-        # in the same shape the filed branch uses, so approving the dry run
-        # means approving the retailer too.
+        # The payload names the case but not its destination, so the portal is
+        # the half a reviewer cannot recover from the fields.
         payload = result["dry_run"]
         if args.json:
             print(json.dumps({"portal": portal.key, "dry_run": payload}, indent=2))
@@ -439,8 +437,6 @@ def _describe_payload(payload: object) -> str:
 
 
 _EXAMPLES = """examples:
-  every command names the portal it acts on
-
   walmart-support --portal walmart auth check
   walmart-support --portal walmart cases list --status "need info"
   walmart-support --portal walmart cases get 10000001
@@ -457,7 +453,7 @@ _EXAMPLES = """examples:
 notes:
   every command takes --json for machine-readable output
   cases create files nothing unless --submit is given
-  --portal is required on every command; there is no default portal
+  --portal is required on every command
   filing works on both portals; --platform and --advertisers are Walmart only
 """
 
@@ -481,7 +477,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--portal",
         required=True,
         metavar="NAME",
-        help=f"portal to act on ({', '.join(PORTALS)}); required on every command",
+        help=f"portal to act on ({', '.join(PORTALS)})",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

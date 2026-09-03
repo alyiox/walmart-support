@@ -78,9 +78,7 @@ def _timeout(*candidates: object) -> int:
 def load_config(path: Path = CONFIG_PATH, *, portal: str) -> Config:
     """Load settings for one portal.
 
-    ``portal`` is the ``--portal`` flag, and it is the only thing that selects
-    one. The config describes each portal but never picks between them: a
-    portal is a retailer, and every command says out loud which one it acts on.
+    ``portal`` is the ``--portal`` flag, and the only thing that selects one.
     """
     if not path.exists():
         raise RuntimeError(

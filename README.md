@@ -73,8 +73,7 @@ uvx walmart-support --portal walmart categories list --platform sponsored-search
 ```
 
 `--portal` and `--json` are global, so they go before the subcommand. `--portal` is required on
-every command: nothing in the config selects a portal, so each invocation says which retailer it
-acts on rather than inheriting a choice made elsewhere.
+every command.
 
 Reaching for it daily, or working offline? `uv tool install walmart-support`
 puts it on `PATH` and starts faster; `walmart-support --version` reports which

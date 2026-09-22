@@ -447,6 +447,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "-V",
         "--version",
         action="version",
         version=f"walmart-support {_version()}",

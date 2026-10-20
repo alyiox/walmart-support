@@ -1,24 +1,30 @@
 """Case creation.
 
-The portal's wizard is data-driven: ``getCaseCategoriesNew`` returns
-``Case_Category__c`` records for each level, and the level a user lands on
-carries the form fields to collect. A filing action then takes flat parameters
-that restate that selection in both display and backend form.
+The portal's wizard is data-driven, and the two orgs drive it differently:
+
+* Walmart serves the category tree through ``getCategoryTree``, and the issue a
+  user lands on names a form config that ``getFormForConfig`` expands into
+  typed fields, each bound to a Case field. Those fields travel back in
+  ``additionalFieldsString``, whole, the way the form's own controller sends
+  them.
+* Sam's Club serves ``Case_Category__c`` records through
+  ``getCaseCategoriesNew``, and no category there declares form fields.
 
 Category identifiers are looked up by name at call time rather than hardcoded,
 so the mapping follows the portal if a category is re-labelled or re-ided.
 
-**The parameter mapping below is inferred**, from each component's published
-method signature plus the category records — not from an observed submit. Only
-the identity and category fields are confirmed. That is why the CLI refuses to
-submit without an explicit flag: a mis-mapped category would file a real but
-misrouted case with support.
+**The parameter mapping below is taken from each form's own controller**, not
+from an observed submit. That is why the CLI refuses to submit without an
+explicit flag: a mis-mapped category would file a real but misrouted case with
+support. Walmart validates its form fields only in the browser — its
+``openCase`` inserts a case with a required field left blank — so the checks
+the form would have run are made here instead, as :attr:`Submission.problems`.
 
 Which action files the case is the portal's business, so a draft becomes a
 :class:`Submission` — the method name plus its parameters — rather than one
 payload shape:
 
-* Walmart: ``openCase`` with the 31 parameters it declares.
+* Walmart: ``openCase`` with the 19 parameters it declares.
 * Sam's Club, under the API category: ``saveApiCase`` with a single wrapper
   object, which is what that portal's own form submits there. Nothing else
   reaches those cases correctly — ``openCase`` on that org HTML-escapes
@@ -37,6 +43,8 @@ declares ``Support_Forms__r``.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -49,6 +57,39 @@ CONTACT_PAGE = "/s/contact?language=en_US"
 OPEN_CASE = "openCase"
 
 DEFAULT_GEO = "US"
+
+# The category selector renames a few ad units before asking for their tree;
+# the unit itself still reaches openCase under its channel name.
+_TREE_PLATFORMS: Mapping[str, str] = {
+    "Display": "Onsite Display",
+    "ShopBuilder": "BrandShops",
+    "Store Ads": "In-Store Ads",
+}
+
+# getFormForConfig names field types one way and the openCase wrapper expects
+# the older names, which the form translates before sending.
+_LEGACY_FIELD_TYPES: Mapping[str, str] = {
+    "Picklist": "SinglePicklist",
+    "MultiPicklist": "MultiSelectPicklist",
+    "Radio": "RadioGroup",
+    "File": "File Upload",
+}
+
+_FILE_UPLOAD = "File Upload"
+_ADVERTISER_GROUP = "advertiser"
+# The titles the form fills from its advertiser picker, matched by name as the
+# form matches them; a few forms declare the id outside the advertiser group.
+_ADVERTISER_ID = "walmart ad center advertiser id"
+_ADVERTISER_NAME = "walmart advertiser name"
+
+
+class FormError(ValueError):
+    """A draft names form fields the selected issue does not have.
+
+    Raised before anything is filed, so the caller fixes the command rather
+    than the connection.
+    """
+
 
 # The one API issue whose form collects company, billing and admin details this
 # CLI does not ask for. Sam's marks its wrapper with a flag of its own, so the
@@ -102,10 +143,12 @@ class Identity:
 class Category:
     """One level of the wizard.
 
-    Each wizard record links to a plain "Category" record that carries the two
-    values that actually matter: the label the UI dropdown shows, and the value
-    written to the Case. For API support those are "API Support" and
-    "API-AdCases" — the latter is what a filed case reports as its category.
+    On Sam's Club each wizard record links to a plain "Category" record that
+    carries the two values that actually matter: the label the UI dropdown
+    shows, and the value written to the Case. For API support those are "API"
+    and "API-AdCases" — the latter is what a filed case reports as its
+    category. Walmart's tree has one name per node, so both are that label,
+    and an issue carries the ``config_id`` its form is built from.
     """
 
     record_id: str
@@ -113,6 +156,7 @@ class Category:
     backend_name: str
     wizard_name: str
     form_fields: list[str] = field(default_factory=list)
+    config_id: str = ""
 
     def matches(self, wanted: str) -> bool:
         needle = wanted.casefold()
@@ -139,14 +183,50 @@ def _category(record: dict[str, Any], level: int) -> Category:
     )
 
 
-def fetch_category_tree(
+def _node(node: dict[str, Any]) -> Category:
+    label = str(node.get("label") or "")
+    return Category(
+        record_id=str(node.get("id") or ""),
+        label=label,
+        backend_name=label,
+        wizard_name=label,
+        config_id=str(node.get("configId") or ""),
+    )
+
+
+def _fetch_form_tree(
     session: AuraSession, *, ad_unit: str, partner_channel: str
+) -> list[tuple[Category, list[Category]]]:
+    """Walmart's tree: nested nodes, the issues a level down from each category."""
+    raw = session.apex(
+        _COMPONENT,
+        "getCategoryTree",
+        {
+            "platform": _TREE_PLATFORMS.get(ad_unit, ad_unit),
+            "userType": partner_channel,
+            "auth": "Authenticated",
+        },
+    )
+    tree = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(tree, list):
+        raise AuraError("getCategoryTree", "unexpected category payload")
+    return [
+        (_node(l1), [_node(l2) for l2 in l1.get("children") or [] if isinstance(l2, dict)])
+        for l1 in tree
+        if isinstance(l1, dict)
+    ]
+
+
+def fetch_category_tree(
+    session: AuraSession, *, ad_unit: str, partner_channel: str, portal: Portal
 ) -> list[tuple[Category, list[Category]]]:
     """Return the support categories as the UI dropdown presents them.
 
     ``partner_channel`` is the caller's own user type; without it the portal
     answers with an empty tree rather than an error.
     """
+    if portal.form_engine:
+        return _fetch_form_tree(session, ad_unit=ad_unit, partner_channel=partner_channel)
     raw = session.apex(
         _COMPONENT,
         "getCaseCategoriesNew",
@@ -171,13 +251,22 @@ def fetch_category_tree(
 
 
 def resolve_categories(
-    session: AuraSession, *, category: str, issue: str, ad_unit: str, partner_channel: str
+    session: AuraSession,
+    *,
+    category: str,
+    issue: str,
+    ad_unit: str,
+    partner_channel: str,
+    portal: Portal,
 ) -> CategorySelection:
     """Look up the L1/L2 category pair the portal would have selected."""
-    tree = fetch_category_tree(session, ad_unit=ad_unit, partner_channel=partner_channel)
+    tree = fetch_category_tree(
+        session, ad_unit=ad_unit, partner_channel=partner_channel, portal=portal
+    )
+    action = "getCategoryTree" if portal.form_engine else "getCaseCategoriesNew"
     if not tree:
         raise AuraError(
-            "getCaseCategoriesNew",
+            action,
             f"the portal offers no categories for ad unit {ad_unit!r} on channel "
             f"{partner_channel!r}; check the ad unit against 'categories list'",
         )
@@ -185,13 +274,13 @@ def resolve_categories(
     match = next(((l1, kids) for l1, kids in tree if l1.matches(category)), None)
     if match is None:
         names = ", ".join(sorted(l1.label for l1, _ in tree))
-        raise AuraError("getCaseCategoriesNew", f"no category matching {category!r}; have: {names}")
+        raise AuraError(action, f"no category matching {category!r}; have: {names}")
 
     parent, children = match
     child = next((c for c in children if c.matches(issue)), None)
     if child is None:
         names = ", ".join(sorted(c.label for c in children)) or "(none)"
-        raise AuraError("getCaseCategoriesNew", f"no issue matching {issue!r}; have: {names}")
+        raise AuraError(action, f"no issue matching {issue!r}; have: {names}")
 
     return CategorySelection(level1=parent, level2=child)
 
@@ -202,44 +291,250 @@ class CaseDraft:
     description: str
     advertisers: str = ""
     category: str = "API"
-    issue: str = "Endpoint-specific problem"
+    issue: str = "Endpoint-Specific"
     # Already resolved by Portal.resolve_ad_unit: which names are accepted is
     # the portal's business, not the draft's.
     ad_unit: str = WALMART.ad_unit
     geo: str = DEFAULT_GEO
+    # Values for the issue's own form fields, keyed by the label the form shows.
+    fields: Mapping[str, str] = field(default_factory=dict)
 
 
-def _additional_fields(draft: CaseDraft, identity: Identity, selection: CategorySelection) -> str:
-    """The ``additionalFieldsString`` value for a draft.
+@dataclass(frozen=True)
+class FormField:
+    """One field of a Walmart issue form, as ``getFormForConfig`` declares it."""
 
-    Only fields this category actually declares are sent. The shape is a JSON
-    list of AdditionalFieldWrapper objects keyed title/value, mirroring the
-    ``Support_Form__c`` records' own ``Title__c``: Apex deserializes the string
-    into a List (an object gives "Expected '[' at the beginning of List/Set")
-    and rejects any other key by name.
-    """
-    # "Advertiser Account Name" is deliberately absent: it collides with
-    # "Advertisers Affected" on the portal's side, which stored the account name
-    # under the advertisers field and dropped the ids. The account already
-    # reaches the case through selectedAccountId and guestAccountName.
-    values = {
-        "Name": identity.contact_name,
-        "Email": identity.contact_email,
-        "Advertisers Affected": draft.advertisers,
-        "Description": draft.description,
-    }
-    declared = set(selection.level2.form_fields)
-    return json.dumps(
-        [
-            {"title": label, "value": value}
-            for label, value in values.items()
-            if label in declared and value
-        ]
+    record_id: str
+    label: str
+    # The Case field the value lands in; empty for a file upload.
+    case_field: str
+    # Already translated to the name the openCase wrapper expects.
+    field_type: str
+    required: bool
+    options: tuple[str, ...] = ()
+    help_text: str = ""
+    validation: str = ""
+    validation_message: str = ""
+    # Rendered by the form itself rather than as a plain input.
+    custom_ui: bool = False
+    read_only: bool = False
+    group: str = ""
+    depends_on: str = ""
+    depends_on_values: str = ""
+    default: str = ""
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> FormField:
+        kind = str(record.get("fieldType") or "")
+        return cls(
+            record_id=str(record.get("id") or ""),
+            label=str(record.get("label") or ""),
+            case_field=str(record.get("caseField") or ""),
+            field_type=_LEGACY_FIELD_TYPES.get(kind, kind),
+            required=record.get("required") == "Always",
+            options=tuple(
+                str(o.get("label"))
+                for o in record.get("options") or []
+                if isinstance(o, dict) and o.get("label")
+            ),
+            help_text=str(record.get("helpText") or ""),
+            validation=str(record.get("validationPattern") or ""),
+            validation_message=str(record.get("validationMessage") or ""),
+            custom_ui=record.get("customUi") is True,
+            read_only=record.get("readOnly") is True,
+            group=str(record.get("fieldGroup") or ""),
+            depends_on=str(record.get("dependsOnFieldId") or ""),
+            depends_on_values=str(record.get("dependsOnValue") or ""),
+            default=str(record.get("value") or ""),
+        )
+
+    @property
+    def is_description(self) -> bool:
+        return "description" in (self.label.strip().casefold(), self.case_field.casefold())
+
+    @property
+    def in_advertiser_group(self) -> bool:
+        return self.group.casefold() == _ADVERTISER_GROUP
+
+    @property
+    def is_advertiser_id(self) -> bool:
+        label = self.label.strip().casefold()
+        return label == _ADVERTISER_ID or (self.in_advertiser_group and "advertiser id" in label)
+
+    @property
+    def is_advertiser_name(self) -> bool:
+        label = self.label.strip().casefold()
+        return label == _ADVERTISER_NAME or (
+            self.in_advertiser_group and "advertiser name" in label
+        )
+
+    @property
+    def is_file(self) -> bool:
+        return self.field_type == _FILE_UPLOAD
+
+    @property
+    def skip(self) -> bool:
+        """The form's own ``skip`` flag: fields it fills or renders itself.
+
+        The advertiser group is drawn as a picker of its own, and the
+        description is the case body.
+        """
+        if self.custom_ui or self.is_description or self.in_advertiser_group:
+            return True
+        if self.read_only:
+            return False
+        return not self.is_file and not self.case_field
+
+    @property
+    def settable(self) -> bool:
+        """Whether a draft supplies this field through ``fields``.
+
+        The advertiser name is typed by hand whenever the account has no
+        advertiser records to pick from, which is the case for an API partner.
+        """
+        if self.is_file or self.is_description or self.is_advertiser_id:
+            return False
+        return self.is_advertiser_name or not self.skip
+
+    def condition_met(self, values: Mapping[str, str]) -> bool:
+        """Whether the field it depends on holds one of the values it shows for."""
+        if not self.depends_on:
+            return True
+        allowed = [v.strip() for v in self.depends_on_values.split(",") if v.strip()]
+        if not allowed:
+            return True
+        current = values.get(self.depends_on, "")
+        return any(v.strip() in allowed for v in current.split(";"))
+
+
+@dataclass(frozen=True)
+class Form:
+    """A Walmart issue's form: the fields to fill and the template they came from."""
+
+    template_id: str
+    fields: tuple[FormField, ...]
+    submission_disabled: bool = False
+
+    @property
+    def settable(self) -> tuple[FormField, ...]:
+        return tuple(f for f in self.fields if f.settable)
+
+
+def fetch_form(session: AuraSession, config_id: str) -> Form:
+    """Expand an issue's form config into its fields, deduplicated as the form does."""
+    raw = session.apex(_COMPONENT, "getFormForConfig", {"configId": config_id})
+    payload = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(payload, dict):
+        raise AuraError("getFormForConfig", "unexpected form payload")
+    config = payload.get("config") or {}
+    seen: set[tuple[str, ...]] = set()
+    fields: list[FormField] = []
+    for record in payload.get("fields") or []:
+        if not isinstance(record, dict):
+            continue
+        item = FormField.from_record(record)
+        key = (item.label.strip(), item.case_field, item.field_type)
+        key = tuple(part.casefold() for part in key)
+        if key not in seen:
+            seen.add(key)
+            fields.append(item)
+    return Form(
+        template_id=str(config.get("Form_Template__c") or ""),
+        fields=tuple(fields),
+        submission_disabled=config.get("Disable_Submission__c") is True,
     )
 
 
+def _supplied_values(draft: CaseDraft, form: Form) -> dict[str, str]:
+    """Match the draft's field values to the form, by the label it shows.
+
+    A label the form does not offer is refused rather than dropped, and so is
+    one the draft already fills another way.
+    """
+    by_label = {f.label.strip().casefold(): f for f in form.fields}
+    values: dict[str, str] = {}
+    for label, value in draft.fields.items():
+        target = by_label.get(label.strip().casefold())
+        if target is None or not target.settable:
+            if target is not None and target.is_description:
+                raise FormError(f"{target.label!r} is the case body; pass it as --description-file")
+            if target is not None and target.is_advertiser_id:
+                raise FormError(f"{target.label!r} is filled from --advertisers")
+            offered = ", ".join(repr(f.label) for f in form.settable) or "(none)"
+            raise FormError(f"this issue has no form field {label!r}; it offers: {offered}")
+        values[target.record_id] = value
+    return values
+
+
+def _form_values(draft: CaseDraft, form: Form) -> dict[str, str]:
+    """Each field's value by record id, before dependencies blank any out."""
+    values = {f.record_id: f.default for f in form.fields}
+    values |= _supplied_values(draft, form)
+    for f in form.fields:
+        if f.is_description:
+            values[f.record_id] = draft.description
+        elif f.is_advertiser_id:
+            values[f.record_id] = draft.advertisers
+    return values
+
+
+def form_entries(draft: CaseDraft, form: Form) -> list[dict[str, Any]]:
+    """Every form field with its value, shaped as the form's own controller sends it.
+
+    A field hidden by its dependency goes out blank, as the form sends it.
+    """
+    values = _form_values(draft, form)
+    return [
+        {
+            "title": f.label,
+            "required": f.required,
+            "value": values[f.record_id] if f.condition_met(values) else "",
+            "fieldName": f.case_field or None,
+            "fieldType": f.field_type,
+            "options": list(f.options) or None,
+            "helpText": f.help_text or None,
+            "validations": f.validation or None,
+            "validationErrorMessage": f.validation_message or None,
+            "skip": f.skip,
+        }
+        for f in form.fields
+    ]
+
+
+def form_problems(draft: CaseDraft, form: Form) -> list[str]:
+    """What the portal's own form would refuse to submit.
+
+    The server accepts all of it, so these are the only checks a filing gets.
+    """
+    if form.submission_disabled:
+        return ["the portal does not accept new cases under this issue"]
+    values = _form_values(draft, form)
+    problems: list[str] = []
+    for f in form.fields:
+        if f.is_advertiser_id and f.required and not draft.advertisers:
+            problems.append(f"{f.label!r} is required: pass --advertisers")
+        if f.is_description and f.required and not draft.description.strip():
+            problems.append("the description is required and its file is empty")
+        if not f.settable or not f.condition_met(values):
+            continue
+        value = values[f.record_id]
+        if f.required and not value:
+            hint = f"; one of: {', '.join(f.options)}" if f.options else ""
+            problems.append(f"{f.label!r} is required{hint}")
+        elif value and f.field_type == "SinglePicklist" and f.options and value not in f.options:
+            problems.append(f"{f.label!r} must be one of: {', '.join(f.options)}")
+        elif value and f.validation and not re.search(f.validation, value):
+            problems.append(f.validation_message or f"{f.label!r} does not match {f.validation}")
+    return problems
+
+
 def _open_case_values(
-    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+    draft: CaseDraft,
+    identity: Identity,
+    selection: CategorySelection,
+    *,
+    portal: Portal,
+    form: Form | None = None,
 ) -> dict[str, Any]:
     """Every value ``openCase`` can take, keyed by parameter name casefolded.
 
@@ -248,18 +543,12 @@ def _open_case_values(
     list decides which go out. Lookup is casefolded because Apex binds names
     case-insensitively and only the org's own spelling belongs on the wire.
     """
+    entries = form_entries(draft, form) if form else []
     values: dict[str, Any] = {
-        # Partnership__c is a lookup to a Partnership record and applies to
-        # supplier/seller channels (see getPartnershipLabels), not to API
-        # partners; an account id here fails with FIELD_INTEGRITY_EXCEPTION.
-        "partnershipType": "",
-        "partnershipId": "",
         "selectedAccountId": identity.account_id,
         "guestAccountName": identity.account_name,
         "guestName": identity.contact_name,
         "guestEmail": identity.contact_email,
-        "guestSupplierNumber": "",
-        "externalReference": "",
         "subject": draft.subject,
         "problem": draft.description,
         "problemDomain": selection.level1.label,
@@ -270,11 +559,8 @@ def _open_case_values(
         "backendSubDomain": selection.level2.backend_name,
         "backendSub2Domain": "",
         "backendSub3Domain": "",
-        "additionalFieldsString": _additional_fields(draft, identity, selection),
+        "additionalFieldsString": json.dumps(entries),
         "ArticleNotHelped": "",
-        "caseType": "",
-        "product": draft.ad_unit,
-        "serviceNowKA": "",
         "geo": draft.geo,
         "UserType": identity.user_type,
         "IsFeatureRequest": False,
@@ -282,7 +568,8 @@ def _open_case_values(
         "adUnit": draft.ad_unit,
         "lastLevelCategory": selection.level2.record_id,
         "documentId": [],
-        "billingDisputeJson": "",
+        "advertiserId": draft.advertisers,
+        "formTemplateId": form.template_id if form else "",
         "campaignName": "",
         "supplierChannel": portal.supplier_channel,
     }
@@ -290,7 +577,12 @@ def _open_case_values(
 
 
 def build_payload(
-    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+    draft: CaseDraft,
+    identity: Identity,
+    selection: CategorySelection,
+    *,
+    portal: Portal,
+    form: Form | None = None,
 ) -> dict[str, Any]:
     """Assemble ``openCase`` parameters for a draft, as ``portal`` declares them.
 
@@ -299,7 +591,7 @@ def build_payload(
     blank one. Nothing it does not declare is sent, because Aura would drop it
     in silence and the caller would never learn the value went nowhere.
     """
-    values = _open_case_values(draft, identity, selection, portal=portal)
+    values = _open_case_values(draft, identity, selection, portal=portal, form=form)
     return {name: values[name.casefold()] for name in portal.open_case_params}
 
 
@@ -353,32 +645,46 @@ class Submission:
 
     action: str
     params: dict[str, Any]
+    # What the portal's own form would have refused; filing waits on none.
+    problems: tuple[str, ...] = ()
 
     @property
     def fields(self) -> dict[str, Any]:
         """What a reviewer should read, with a wrapper unwrapped.
 
         ``saveApiCase`` takes its whole payload under one ``advWrapper`` key,
-        which would print as a single unreadable line in the dry run.
+        and Walmart's form fields travel as one JSON string; either would print
+        as a single unreadable line in the dry run. A form field is listed by
+        its label, and the description field is left out because it repeats
+        ``problem``.
         """
         wrapper = self.params.get("advWrapper")
-        return dict(wrapper) if isinstance(wrapper, dict) else dict(self.params)
+        if isinstance(wrapper, dict):
+            return dict(wrapper)
+        view = {k: v for k, v in self.params.items() if k != "additionalFieldsString"}
+        for entry in json.loads(self.params.get("additionalFieldsString") or "[]"):
+            if entry.get("value") and str(entry.get("fieldName") or "").casefold() != "description":
+                view[f"form: {entry.get('title')}"] = entry["value"]
+        return view
 
     @property
     def carries_advertisers(self) -> bool:
         """Whether the advertiser ids a draft named actually reach the portal.
 
-        They ride a declared form field under ``openCase`` and a parameter of
-        their own under ``saveApiCase``, so neither answer generalises.
+        They ride a parameter of their own under either action, but Sam's
+        ``openCase`` declares none.
         """
         fields = self.fields
-        if "advertiserAffected" in fields:
-            return bool(fields["advertiserAffected"])
-        return "Advertisers Affected" in str(fields.get("additionalFieldsString", ""))
+        return bool(fields.get("advertiserAffected") or fields.get("advertiserId"))
 
 
 def build_submission(
-    draft: CaseDraft, identity: Identity, selection: CategorySelection, *, portal: Portal
+    draft: CaseDraft,
+    identity: Identity,
+    selection: CategorySelection,
+    *,
+    portal: Portal,
+    form: Form | None = None,
 ) -> Submission:
     """Choose the action ``portal`` files this draft with, and build its params.
 
@@ -388,11 +694,15 @@ def build_submission(
     if portal.api_case_action and selection.level1.label.strip() == API_CATEGORY:
         wrapper = build_api_case(draft, identity, selection, portal=portal)
         return Submission(portal.api_case_action, {"advWrapper": wrapper})
-    return Submission(OPEN_CASE, build_payload(draft, identity, selection, portal=portal))
+    params = build_payload(draft, identity, selection, portal=portal, form=form)
+    problems = tuple(form_problems(draft, form)) if form else ()
+    return Submission(OPEN_CASE, params, problems)
 
 
 def prepare(session: AuraSession, draft: CaseDraft, *, portal: Portal) -> Submission:
     """Resolve everything needed to file ``draft``, without filing it."""
+    if draft.fields and not portal.form_engine:
+        raise FormError(f"{portal.label} declares no form fields, so --field does not apply")
     identity = Identity.fetch(session)
     selection = resolve_categories(
         session,
@@ -400,8 +710,14 @@ def prepare(session: AuraSession, draft: CaseDraft, *, portal: Portal) -> Submis
         issue=draft.issue,
         ad_unit=draft.ad_unit,
         partner_channel=identity.user_type,
+        portal=portal,
     )
-    return build_submission(draft, identity, selection, portal=portal)
+    form = None
+    if portal.form_engine:
+        if not selection.level2.config_id:
+            raise AuraError("getCategoryTree", f"{selection.level2.label!r} names no form config")
+        form = fetch_form(session, selection.level2.config_id)
+    return build_submission(draft, identity, selection, portal=portal, form=form)
 
 
 def submit(session: AuraSession, submission: Submission) -> dict[str, Any]:

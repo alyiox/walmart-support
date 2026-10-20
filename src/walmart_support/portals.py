@@ -3,12 +3,12 @@
 The Advertising Help portal is two sites, not one: Walmart Connect at
 ``advertisinghelp.walmart.com`` and Sam's Club at
 ``advertisinghelp.samsclub.com``. They are separate Salesforce orgs running
-the same custom app — same ``AC_*`` Apex controllers taking the same
-parameters, same ``Case_Category__c`` schema, same Aura transport — so one
-client serves both and only org *configuration* differs.
+the same custom ``AC_*`` app over the same Aura transport, so one client serves
+both and only org *configuration* differs.
 
 The differences below were established against both live orgs, including one
-case filed end to end on Sam's Club.
+case filed end to end on Sam's Club, and re-established on Walmart after its
+October 2026 rebuild.
 
 That configuration is what this module holds:
 
@@ -18,14 +18,16 @@ That configuration is what this module holds:
 * Walmart's ``getAuthenticationStatus`` carries the account on the contact
   record; Sam's Club leaves it off and names the advertiser through
   ``getAdvertiserInfo`` instead.
-* Filing is not one method. Walmart declares a 31-parameter ``openCase`` and
-  nothing else; Sam's declares 19 parameters on ``openCase`` plus a
-  ``saveApiCase`` that its own form uses for every case under the API
-  category. Aura drops undeclared parameters in silence, so one shared
-  31-parameter call looked like it worked on both while Sam's quietly
-  discarded 15 of them — ``additionalFieldsString`` among them, which is the
-  only thing carrying the advertiser ids. Both signatures are recorded here so
-  each org gets the call it actually declares.
+* The case form is built differently. Walmart serves a category tree
+  through ``getCategoryTree`` and each issue's fields through
+  ``getFormForConfig``; Sam's still serves ``getCaseCategoriesNew`` records
+  and declares no form fields at all.
+* Filing is not one method. Walmart declares a 19-parameter ``openCase`` and
+  nothing else; Sam's declares a *different* 19 parameters on ``openCase``
+  plus a ``saveApiCase`` that its own form uses for every case under the API
+  category. Aura drops undeclared parameters in silence, so a call shaped for
+  one org looks like it works on the other while values vanish. Both
+  signatures are recorded here so each org gets the call it actually declares.
 * Sam's ``openCase`` HTML-escapes ``subject`` and ``problem`` **twice** before
   the insert; its ``saveApiCase`` stores the same bytes raw, and so does
   Walmart's ``openCase``. Routing API cases the way the portal's own form does
@@ -63,7 +65,7 @@ class PortalError(ValueError):
 # shows Sponsored Products for any Search case.
 _WALMART_PLATFORMS: Mapping[str, str] = MappingProxyType(
     {
-        "display": "Display",
+        "display": "Onsite Display",
         "sponsored-search": "Sponsored Products",
         "search": "Sponsored Products",
         "sponsored-products": "Sponsored Products",
@@ -83,37 +85,25 @@ _NO_PLATFORMS: Mapping[str, str] = MappingProxyType({})
 # differently, hence ``ArticleNotHelped`` here against ``articleNotHelped``
 # there.
 _WALMART_OPEN_CASE: tuple[str, ...] = (
-    "partnershipType",
-    "partnershipId",
     "selectedAccountId",
     "guestAccountName",
     "guestName",
     "guestEmail",
-    "guestSupplierNumber",
-    "externalReference",
     "subject",
     "problem",
     "problemDomain",
     "subDomain",
     "subDomain2",
     "subDomain3",
-    "backendDomain",
-    "backendSubDomain",
-    "backendSub2Domain",
-    "backendSub3Domain",
     "additionalFieldsString",
     "ArticleNotHelped",
-    "caseType",
-    "product",
-    "serviceNowKA",
     "geo",
     "UserType",
-    "IsFeatureRequest",
-    "currentExperience",
     "adUnit",
     "lastLevelCategory",
     "documentId",
-    "billingDisputeJson",
+    "advertiserId",
+    "formTemplateId",
 )
 
 _SAMSCLUB_OPEN_CASE: tuple[str, ...] = (
@@ -162,6 +152,10 @@ class Portal:
     # Which parameters this org's openCase declares, in its own spelling.
     open_case_params: tuple[str, ...]
     platforms: Mapping[str, str] = _NO_PLATFORMS
+    # Whether this org builds its case form from ``getCategoryTree`` and
+    # ``getFormForConfig``, whose fields a draft must fill, rather than from
+    # ``getCaseCategoriesNew`` records.
+    form_engine: bool = False
     # The Apex method this org files API-category cases through, when that is
     # not openCase. Sam's own contact form never calls openCase for anything
     # under API: AC_OpenCase sets isApiCase from the level-1 label and submits
@@ -210,9 +204,10 @@ WALMART = Portal(
     label="Walmart Connect",
     support_label="WALMART",
     base_url="https://advertisinghelp.walmart.com",
-    ad_unit="Display",
+    ad_unit="Onsite Display",
     open_case_params=_WALMART_OPEN_CASE,
     platforms=_WALMART_PLATFORMS,
+    form_engine=True,
 )
 
 SAMSCLUB = Portal(

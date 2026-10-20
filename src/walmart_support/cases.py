@@ -204,15 +204,22 @@ class CaseDetail:
         comments = [
             Comment.from_record(c) for c in payload.get("comments") or [] if isinstance(c, dict)
         ]
+        # A case Walmart migrated from its previous org keeps the number its
+        # owner knows in displayCaseNumber, and its real category under GCRM_*;
+        # Issue_Category__c holds a placeholder there.
         return cls(
             case_id=str(detail.get("Id") or ""),
-            case_number=str(detail.get("CaseNumber") or ""),
+            case_number=str(payload.get("displayCaseNumber") or detail.get("CaseNumber") or ""),
             subject=undouble_escape(str(detail.get("Subject") or "")),
             description=undouble_escape(str(detail.get("Description") or "")),
             status=str(detail.get("Status") or ""),
             priority=str(detail.get("Priority") or ""),
-            issue_category=str(detail.get("Issue_Category__c") or ""),
-            sub_category=str(detail.get("Sub_Category_1__c") or ""),
+            issue_category=str(
+                detail.get("GCRM_Issue_category__c") or detail.get("Issue_Category__c") or ""
+            ),
+            sub_category=str(
+                detail.get("GCRM_Sub_category_1__c") or detail.get("Sub_Category_1__c") or ""
+            ),
             created_date=str(detail.get("CreatedDate") or ""),
             link=str(detail.get("CommunityCaseLink__c") or ""),
             contact_name=str(detail.get("Sponsored_Ad_Contact_Name__c") or ""),

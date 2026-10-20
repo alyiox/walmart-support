@@ -63,9 +63,12 @@ uvx walmart-support --portal samsclub cases list --limit 5
 uvx walmart-support --portal samsclub cases get 00010002
 
 uvx walmart-support --portal walmart cases create \
-  --platform display \
-  --category "API Support" --issue "Endpoint-specific problem" \
-  --subject "Display API: ..." --advertisers "111111, 222222" \
+  --platform sponsored-products \
+  --category API --issue Endpoint-Specific \
+  --subject "SP API: ..." --advertisers 111111 \
+  --field "SP Endpoint=/api/v1/stats" \
+  --field-file "Request / Response Details=./curl.txt" \
+  --field-file "Error Message=./error.txt" \
   --description-file ./body.txt                # prints the payload
 uvx walmart-support --portal walmart cases create ... --submit   # actually files it
 
@@ -162,22 +165,29 @@ deliberate: a case goes to a real support queue, and a mis-mapped category files
 a real but misrouted one.
 
 Categories are resolved by name against the portal's own dropdown data rather
-than hardcoded, so `categories list` shows exactly what the UI offers and both
-the UI label ("API Support") and the wizard's internal name ("API") match.
+than hardcoded, so `categories list` shows exactly what the UI offers.
 
-`--platform` covers Display and Sponsored Search; the portal collapses Search
-onto its "Sponsored Products" ad unit, which is why a Search case shows
-Sponsored Products as its platform. Sponsored Brands and Videos are accepted
-but the portal publishes no categories for them on a partner account, and the
-error says so. Sam's Club publishes no ad-unit channels at all, so it has no
-platform picker and `--platform` is refused there rather than ignored.
+On Walmart each issue carries its own form — an endpoint picklist, the request
+and response, the error message — and `--field LABEL=VALUE` or
+`--field-file LABEL=PATH` fills it, by the label the portal shows. The dry run
+names every required field still empty, with the values a picklist accepts,
+and `--submit` is refused until there are none: the portal itself files a case
+with them blank. Sam's Club has no such forms, and refuses `--field`.
+
+`--platform` covers Onsite Display, Sponsored Search and Shop Builder; the
+portal collapses Search onto its "Sponsored Products" ad unit, which is why a
+Search case shows Sponsored Products as its platform. Sponsored Brands and
+Videos are accepted but the portal publishes no categories for them on a
+partner account, and the error says so. Sam's Club publishes no ad-unit
+channels at all, so it has no platform picker and `--platform` is refused there
+rather than ignored.
 
 The action answers with the new case's number. `saveApiCase` has not yet
 completed an insert from this client, so the first Sam's Club API case filed
 through it is its own proof.
 
-**Put anything that matters in the description body**: it is stored verbatim,
-whereas the additional form fields are not reliably addressable.
+**Put anything that matters in the description body as well**: it is stored
+verbatim, whereas no form field has yet been confirmed to land on a filed case.
 
 ## Closing a case
 

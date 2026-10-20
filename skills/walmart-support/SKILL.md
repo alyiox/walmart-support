@@ -108,6 +108,14 @@ skeleton for the body.
 with `--submit`. Never put `--submit` on the first attempt, and show the payload to the user
 before you do.
 
+A Walmart issue has a form of its own, filled with `--field "LABEL=VALUE"` and, for prose such as
+a request/response or an error body, `--field-file "LABEL=PATH"`. The dry run lists every required
+field still empty — with the values a picklist accepts — under `the portal's form would reject
+this case`, and `--submit` exits 2 until that list is gone. **The portal does not check these
+itself**, so that refusal is the only gate; never work around it with placeholder values. A label
+the issue does not have exits 2 and names the ones it does. Sam's Club has no forms and refuses
+`--field`.
+
 The preview ends `would file at <portal> through <action>.`, and `--json` carries `portal` and
 `action`. Read both. The payload names the case but never its destination, and **the two portals
 file through different Apex methods**: Walmart always `openCase`, Sam's Club `saveApiCase` under
@@ -175,5 +183,6 @@ identifiers into another's support queue.
 - `1` — portal or network failure (expired session, timeout, portal error), or a close the portal
   accepted without moving the status. Report it; do not retry blindly.
 - `2` — usage, missing config, an unknown portal, a platform the portal does not offer, an empty or
-  over-length reply, a missing attachment file, closing on a portal that does not support it, or
-  the deep-search cap. Fix the command, not the connection.
+  over-length reply, a missing attachment file, closing on a portal that does not support it, the
+  deep-search cap, a form field the issue does not have, or `--submit` while the form still has
+  problems. Fix the command, not the connection.

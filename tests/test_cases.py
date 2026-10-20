@@ -194,6 +194,27 @@ def test_comment_html_is_flattened() -> None:
     assert walmart.body == "We're looking into this."
 
 
+def test_a_migrated_case_reads_under_the_number_and_category_its_owner_knows() -> None:
+    # Walmart's October 2026 rebuild moved cases into a new org: the number
+    # support's emails quote and the real category stay on GCRM_* fields, and
+    # the new org's own fields hold a fresh number and a placeholder.
+    migrated = json.loads(json.dumps(DETAIL))
+    migrated["displayCaseNumber"] = "10000001"
+    migrated["detail"] |= {
+        "CaseNumber": "00035294",
+        "IsMigrated__c": True,
+        "GCRM_Case_Number__c": "10000001",
+        "GCRM_Issue_category__c": "API-AdCases",
+        "GCRM_Sub_category_1__c": "Production API Access",
+        "Issue_Category__c": "GCRM Issue Category",
+        "Sub_Category_1__c": "GCRM Sub Category",
+    }
+    detail = fetch_case_detail(_detail_session(migrated), "10000001")
+    assert detail.case_number == "10000001"
+    assert detail.issue_category == "API-AdCases"
+    assert detail.sub_category == "Production API Access"
+
+
 def test_missing_case_raises() -> None:
     with pytest.raises(AuraError, match="not found"):
         fetch_case_detail(_detail_session({"detail": {}, "comments": []}), "10000001")

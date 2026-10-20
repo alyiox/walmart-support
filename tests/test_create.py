@@ -8,7 +8,9 @@ import pytest
 from walmart_support.aura import AuraError, AuraSession
 from walmart_support.create import (
     CaseDraft,
+    FormError,
     Identity,
+    Submission,
     build_payload,
     build_submission,
     fetch_category_tree,
@@ -102,6 +104,79 @@ TREE = {
 }
 
 
+# Walmart's tree as getCategoryTree serves it: one label per node, and an
+# issue names the form config its fields come from.
+WALMART_TREE = [
+    {
+        "label": "API",
+        "id": "L1API",
+        "configId": None,
+        "children": [
+            {"label": "Endpoint-Specific", "id": "L2EP", "configId": "CFGEP", "children": []},
+            {"label": "Throttling", "id": "L2THR", "configId": "CFGTHR", "children": []},
+        ],
+    },
+    {
+        "label": "Billing",
+        "id": "L1BILL",
+        "configId": None,
+        "children": [{"label": "Disputes", "id": "L2DISP", "configId": "CFGDISP"}],
+    },
+]
+
+
+def _field(label: str, **extra: object) -> dict[str, object]:
+    record: dict[str, object] = {
+        "id": f"F-{label}",
+        "label": label,
+        "caseField": None,
+        "fieldType": "Text",
+        "required": "Never",
+        "options": [],
+        "customUi": False,
+        "readOnly": False,
+        "fieldGroup": None,
+        "dependsOnFieldId": None,
+        "dependsOnValue": None,
+        "validationPattern": None,
+        "value": None,
+    }
+    return record | extra
+
+
+# Mirrors the live Endpoint-Specific form: the advertiser id is drawn by the
+# form itself, the description is the case body, and the file input binds no
+# Case field.
+FORM = {
+    "config": {"Form_Template__c": "TPL1", "Disable_Submission__c": False},
+    "fields": [
+        _field(
+            "Walmart Ad Center Advertiser ID",
+            caseField="WAC_Advertiser_Id__c",
+            customUi=True,
+            fieldGroup="Advertiser",
+        ),
+        _field(
+            "SP Endpoint",
+            caseField="API_Endpoint__c",
+            fieldType="Picklist",
+            required="Always",
+            options=[{"label": "/api/v1/stats", "value": "/api/v1/stats"}],
+        ),
+        _field(
+            "Request / Response Details",
+            caseField="Request_Response_Details__c",
+            fieldType="TextArea",
+            required="Always",
+        ),
+        _field("Description", caseField="Description", fieldType="TextArea", required="Always"),
+        _field("Screenshot/Document", fieldType="File"),
+    ],
+}
+
+FILLED = {"SP Endpoint": "/api/v1/stats", "Request / Response Details": "curl ..."}
+
+
 def _samsclub_tree() -> dict[str, object]:
     """The same tree as Sam's Club serves it.
 
@@ -126,22 +201,36 @@ def _selection(portal: Portal, *, category: str = "API", issue: str = "Endpoint"
         issue=issue,
         ad_unit=portal.ad_unit,
         partner_channel="p",
+        portal=portal,
     )
 
 
-def _session(*, tree: dict[str, object] | None = None, auth: dict[str, object] | None = None):
+def _session(
+    *,
+    tree: object | None = None,
+    auth: dict[str, object] | None = None,
+    form: dict[str, object] | None = None,
+    sent: list[dict[str, object]] | None = None,
+):
     page = make_page(authenticated=True)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "aura" not in request.url.path:
             return httpx.Response(200, text=page)
         hint = str(request.url)
+        if sent is not None:
+            message = json.loads(dict(httpx.QueryParams(request.content.decode()))["message"])
+            sent.append(message["actions"][0])
         if "getAuthenticationStatus" in hint:
             value: object = auth if auth is not None else AUTH
         elif "getAdvertiserInfo" in hint:
             value = ADVERTISERS
         elif "getCaseCategoriesNew" in hint:
             value = json.dumps(tree if tree is not None else TREE)
+        elif "getCategoryTree" in hint:
+            value = json.dumps(tree if tree is not None else WALMART_TREE)
+        elif "getFormForConfig" in hint:
+            value = json.dumps(form if form is not None else FORM)
         else:
             value = {"caseNumber": "10000005"}
         return httpx.Response(
@@ -158,11 +247,11 @@ def test_platform_aliases_cover_sponsored_search() -> None:
     assert WALMART.resolve_ad_unit("sponsored-search") == "Sponsored Products"
     assert WALMART.resolve_ad_unit("Sponsored Search") == "Sponsored Products"
     assert WALMART.resolve_ad_unit("search") == "Sponsored Products"
-    assert WALMART.resolve_ad_unit("display") == "Display"
+    assert WALMART.resolve_ad_unit("display") == "Onsite Display"
     # internal name accepted verbatim
-    assert WALMART.resolve_ad_unit("Display") == "Display"
+    assert WALMART.resolve_ad_unit("Onsite Display") == "Onsite Display"
     # and no platform at all falls back to the portal's own default
-    assert WALMART.resolve_ad_unit(None) == "Display"
+    assert WALMART.resolve_ad_unit(None) == "Onsite Display"
 
 
 def test_unknown_platform_lists_the_valid_ones() -> None:
@@ -183,7 +272,9 @@ def test_identity_rejects_unauthenticated() -> None:
 
 
 def test_tree_uses_the_linked_records_labels() -> None:
-    tree = fetch_category_tree(_session(), ad_unit="Display", partner_channel="p")
+    tree = fetch_category_tree(
+        _session(), ad_unit="Sponsored Products", partner_channel="p", portal=SAMSCLUB
+    )
     l1, kids = tree[0]
     # the UI dropdown label, not the wizard record's internal name
     assert l1.label == "API Support"
@@ -200,8 +291,9 @@ def test_categories_match_by_ui_label_or_internal_name() -> None:
             session,
             category=name,
             issue="Endpoint-specific",
-            ad_unit="Display",
+            ad_unit="Sponsored Products",
             partner_channel="p",
+            portal=SAMSCLUB,
         )
         assert chosen.level1.backend_name == "API-AdCases"
 
@@ -209,98 +301,228 @@ def test_categories_match_by_ui_label_or_internal_name() -> None:
 def test_unknown_category_reports_the_available_ones() -> None:
     with pytest.raises(AuraError, match="Billing"):
         resolve_categories(
-            _session(), category="Nonsense", issue="x", ad_unit="Display", partner_channel="p"
+            _session(),
+            category="Nonsense",
+            issue="x",
+            ad_unit="Onsite Display",
+            partner_channel="p",
+            portal=WALMART,
         )
 
 
 def test_unknown_issue_reports_the_available_ones() -> None:
-    with pytest.raises(AuraError, match="Endpoint-specific problem"):
+    with pytest.raises(AuraError, match="Endpoint-Specific, Throttling"):
         resolve_categories(
-            _session(), category="API", issue="Nonsense", ad_unit="Display", partner_channel="p"
+            _session(),
+            category="API",
+            issue="Nonsense",
+            ad_unit="Onsite Display",
+            partner_channel="p",
+            portal=WALMART,
         )
 
 
 def test_empty_tree_names_the_ad_unit_and_channel_it_tried() -> None:
     with pytest.raises(AuraError, match="SponsoredVideos.*channel 'p'"):
         resolve_categories(
-            _session(tree={"Level1Categories": [], "Level2Categories": {}}),
+            _session(tree=[]),
             category="API",
             issue="x",
             ad_unit="SponsoredVideos",
             partner_channel="p",
+            portal=WALMART,
         )
 
 
+def test_walmart_tree_names_each_issues_form() -> None:
+    sent: list[dict[str, object]] = []
+    tree = fetch_category_tree(
+        _session(sent=sent), ad_unit="ShopBuilder", partner_channel="p", portal=WALMART
+    )
+    l1, kids = tree[0]
+    assert (l1.label, l1.backend_name) == ("API", "API")
+    assert [(k.label, k.config_id) for k in kids] == [
+        ("Endpoint-Specific", "CFGEP"),
+        ("Throttling", "CFGTHR"),
+    ]
+    # the category selector asks for some ad units under another name
+    asked = next(a for a in sent if "getCategoryTree" in str(a["descriptor"]))
+    assert asked["params"] == {"platform": "BrandShops", "userType": "p", "auth": "Authenticated"}
+
+
 def test_payload_declares_every_parameter() -> None:
-    draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
+    draft = CaseDraft(subject="s", description="d", advertisers="111", fields=FILLED)
     submission = prepare(_session(), draft, portal=WALMART)
     payload = submission.params
     assert submission.action == "openCase"
     # Apex binds by name, so a missing parameter is not the same as a blank one.
-    assert len(payload) == 31
+    assert len(payload) == 19
     assert tuple(payload) == WALMART.open_case_params
-    assert payload["problemDomain"] == "API Support"
-    assert payload["backendDomain"] == "API-AdCases"
-    assert payload["subDomain"] == "Endpoint-specific problem"
+    assert payload["problemDomain"] == "API"
+    assert payload["subDomain"] == "Endpoint-Specific"
     assert payload["lastLevelCategory"] == "L2EP"
-    assert payload["IsFeatureRequest"] is False
+    assert payload["selectedAccountId"] == "0014M00000EXAMPLE"
+    assert payload["advertiserId"] == "111"
+    assert payload["formTemplateId"] == "TPL1"
     assert payload["documentId"] == []
+    assert submission.problems == ()
 
 
-def test_additional_fields_only_carry_declared_ones() -> None:
-    draft = CaseDraft(subject="s", description="d", advertisers="1, 2")
+def test_form_fields_travel_whole_as_the_form_sends_them() -> None:
+    draft = CaseDraft(subject="s", description="body", advertisers="111", fields=FILLED)
     payload = prepare(_session(), draft, portal=WALMART).params
     extra = json.loads(payload["additionalFieldsString"])
-    # a JSON list of title/value pairs: Apex deserializes it into a List, and
-    # rejects any other key by name
-    assert isinstance(extra, list)
-    by_title = {item["title"]: item["value"] for item in extra}
-    assert by_title["Advertisers Affected"] == "1, 2"
-    assert by_title["Description"] == "d"
-    # never sent: it collided with "Advertisers Affected" on the portal's side
-    assert "Advertiser Account Name" not in by_title
+    # a JSON list carrying every field, bound to its Case field by fieldName
+    assert [e["title"] for e in extra] == [f["label"] for f in FORM["fields"]]
+    by_title = {e["title"]: e for e in extra}
+    assert by_title["SP Endpoint"]["value"] == "/api/v1/stats"
+    assert by_title["SP Endpoint"]["fieldName"] == "API_Endpoint__c"
+    assert by_title["SP Endpoint"]["fieldType"] == "SinglePicklist"
+    assert by_title["SP Endpoint"]["options"] == ["/api/v1/stats"]
+    # filled the way the form fills them, and skipped as it skips them
+    assert by_title["Walmart Ad Center Advertiser ID"]["value"] == "111"
+    assert by_title["Walmart Ad Center Advertiser ID"]["skip"] is True
+    assert by_title["Description"]["value"] == "body"
+    assert by_title["Description"]["skip"] is True
+    assert by_title["Screenshot/Document"]["fieldType"] == "File Upload"
+    assert by_title["Screenshot/Document"]["fieldName"] is None
 
 
-def test_a_category_declaring_no_forms_drops_the_advertisers() -> None:
-    # Sam's Club declares no Support_Form__c records on any category, so there
-    # is nowhere to put the advertiser ids and they never reach the wire. The
-    # filed case came back with Advertisers Affected set from the account name
-    # instead, so the CLI warns rather than dropping them silently.
-    bare = json.loads(json.dumps(TREE))
-    del bare["Level2Categories"]["L1API"][0]["Support_Forms__r"]
-    submission = prepare(
-        _session(tree=bare),
-        CaseDraft(subject="s", description="d", advertisers="12345, 67890"),
-        portal=WALMART,
+def test_missing_required_fields_are_problems_not_errors() -> None:
+    # The portal inserts a case with these blank, so the dry run names them
+    # and the CLI refuses --submit on them.
+    submission = prepare(_session(), CaseDraft(subject="s", description="d"), portal=WALMART)
+    assert submission.problems == (
+        "'SP Endpoint' is required; one of: /api/v1/stats",
+        "'Request / Response Details' is required",
     )
-    assert json.loads(submission.params["additionalFieldsString"]) == []
-    # which is what the CLI's warning is keyed on
-    assert submission.carries_advertisers is False
 
 
-def test_partnership_fields_are_left_empty() -> None:
-    payload = prepare(_session(), CaseDraft(subject="s", description="d"), portal=WALMART).params
-    # Partnership__c is a lookup to a Partnership record, not an Account; an
-    # account id there fails the insert with FIELD_INTEGRITY_EXCEPTION
-    assert payload["partnershipType"] == ""
-    assert payload["partnershipId"] == ""
-    assert payload["selectedAccountId"] == "0014M00000EXAMPLE"
+def test_a_picklist_value_must_be_one_the_form_offers() -> None:
+    # labels match regardless of case, as a person would type them
+    fields = {"Request / Response Details": "x", "sp endpoint": "/nope"}
+    submission = prepare(
+        _session(), CaseDraft(subject="s", description="d", fields=fields), portal=WALMART
+    )
+    assert submission.problems == ("'SP Endpoint' must be one of: /api/v1/stats",)
+
+
+def test_an_unknown_field_label_lists_the_offered_ones() -> None:
+    draft = CaseDraft(subject="s", description="d", fields={"Endpoint": "/x"})
+    with pytest.raises(FormError, match="'SP Endpoint', 'Request / Response Details'"):
+        prepare(_session(), draft, portal=WALMART)
+
+
+def test_fields_filled_another_way_are_refused() -> None:
+    for label, flag in (
+        ("Description", "--description-file"),
+        ("Walmart Ad Center Advertiser ID", "--advertisers"),
+    ):
+        draft = CaseDraft(subject="s", description="d", fields={label: "x"})
+        with pytest.raises(FormError, match=flag):
+            prepare(_session(), draft, portal=WALMART)
+
+
+def test_a_required_advertiser_id_needs_advertisers() -> None:
+    form = json.loads(json.dumps(FORM))
+    form["fields"][0]["required"] = "Always"
+    submission = prepare(
+        _session(form=form), CaseDraft(subject="s", description="d", fields=FILLED), portal=WALMART
+    )
+    assert submission.problems == (
+        "'Walmart Ad Center Advertiser ID' is required: pass --advertisers",
+    )
+
+
+def test_a_field_hidden_by_its_dependency_goes_out_blank() -> None:
+    form = json.loads(json.dumps(FORM))
+    form["fields"].append(
+        _field(
+            "Rate Limit",
+            caseField="Rate__c",
+            required="Always",
+            dependsOnFieldId="F-SP Endpoint",
+            dependsOnValue="/api/v1/other",
+        )
+    )
+    draft = CaseDraft(subject="s", description="d", fields=FILLED | {"Rate Limit": "5/s"})
+    submission = prepare(_session(form=form), draft, portal=WALMART)
+    extra = json.loads(submission.params["additionalFieldsString"])
+    assert {e["title"]: e["value"] for e in extra}["Rate Limit"] == ""
+    # and hidden, it is not required either
+    assert submission.problems == ()
+
+
+def test_the_dry_run_lists_form_fields_by_label() -> None:
+    draft = CaseDraft(subject="s", description="d", advertisers="111", fields=FILLED)
+    fields = prepare(_session(), draft, portal=WALMART).fields
+    assert "additionalFieldsString" not in fields
+    assert fields["form: SP Endpoint"] == "/api/v1/stats"
+    # the description field repeats problem, so it is left out
+    assert "form: Description" not in fields
+
+
+def test_advertisers_ride_their_own_parameter() -> None:
+    submission = Submission("openCase", {"advertiserId": "111", "additionalFieldsString": "[]"})
+    assert submission.carries_advertisers is True
+    assert Submission("openCase", {"advertiserId": ""}).carries_advertisers is False
+
+
+def test_the_advertiser_name_is_typed_and_the_id_follows_advertisers() -> None:
+    # An API partner has no advertiser records, so the form's picker falls
+    # back to two inputs; a few forms also declare the id outside its group.
+    form = json.loads(json.dumps(FORM))
+    form["fields"][0] |= {"customUi": False, "fieldGroup": None, "required": "Always"}
+    form["fields"].append(
+        _field(
+            "Walmart Advertiser Name",
+            caseField="WAC_Advertiser_Name__c",
+            customUi=True,
+            fieldGroup="Advertiser",
+            required="Always",
+        )
+    )
+    bare = prepare(
+        _session(form=form), CaseDraft(subject="s", description="d", fields=FILLED), portal=WALMART
+    )
+    assert bare.problems == (
+        "'Walmart Ad Center Advertiser ID' is required: pass --advertisers",
+        "'Walmart Advertiser Name' is required",
+    )
+
+    draft = CaseDraft(
+        subject="s",
+        description="d",
+        advertisers="111",
+        fields=FILLED | {"Walmart Advertiser Name": "Example Brand"},
+    )
+    filled = prepare(_session(form=form), draft, portal=WALMART)
+    assert filled.problems == ()
+    assert filled.fields["form: Walmart Ad Center Advertiser ID"] == "111"
+    assert filled.fields["form: Walmart Advertiser Name"] == "Example Brand"
+
+
+def test_a_disabled_issue_is_a_problem() -> None:
+    form = json.loads(json.dumps(FORM))
+    form["config"]["Disable_Submission__c"] = True
+    submission = prepare(
+        _session(form=form), CaseDraft(subject="s", description="d"), portal=WALMART
+    )
+    assert submission.problems == ("the portal does not accept new cases under this issue",)
+
+
+def test_samsclub_refuses_form_fields() -> None:
+    draft = CaseDraft(subject="s", description="d", fields={"x": "y"})
+    with pytest.raises(FormError, match="no form fields"):
+        prepare(_session(tree=_samsclub_tree()), draft, portal=SAMSCLUB)
 
 
 def test_search_platform_flows_through_to_the_payload() -> None:
     draft = CaseDraft(
         subject="s", description="d", ad_unit=WALMART.resolve_ad_unit("sponsored-search")
     )
-    payload = build_payload(
-        draft,
-        Identity.fetch(_session()),
-        resolve_categories(
-            _session(), category="API", issue="Endpoint", ad_unit="Display", partner_channel="p"
-        ),
-        portal=WALMART,
-    )
+    payload = prepare(_session(), draft, portal=WALMART).params
     assert payload["adUnit"] == "Sponsored Products"
-    assert payload["product"] == "Sponsored Products"
 
 
 def test_identity_falls_back_to_the_advertiser_lookup() -> None:

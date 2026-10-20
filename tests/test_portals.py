@@ -38,7 +38,7 @@ def test_an_unknown_portal_lists_the_valid_ones() -> None:
 def test_walmart_publishes_a_platform_picker() -> None:
     assert WALMART.platforms
     assert WALMART.resolve_ad_unit("shop-builder") == "ShopBuilder"
-    assert WALMART.resolve_ad_unit(None) == "Display"
+    assert WALMART.resolve_ad_unit(None) == "Onsite Display"
 
 
 def test_samsclub_has_no_platform_picker() -> None:

@@ -203,3 +203,61 @@ def test_the_dry_run_json_carries_the_portal_like_the_filed_json(
     assert dry["portal"] == filed["portal"] == "samsclub"
     assert dry["action"] == filed["action"] == "saveApiCase"
     assert dry["dry_run"] == wrapper
+
+
+def test_submit_is_refused_while_the_form_has_problems(
+    cli: Callable[..., int],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Walmart inserts a case its own form would have refused, so the CLI is
+    # the only thing standing between a blank required field and a filing.
+    submission = Submission("openCase", {"subject": "s"}, ("'SP Endpoint' is required",))
+    filed: list[Submission] = []
+    monkeypatch.setattr(cli_module, "prepare", lambda session, draft, portal: submission)
+    monkeypatch.setattr(cli_module, "submit", lambda session, sub: filed.append(sub) or {})
+    monkeypatch.setattr(cli_module, "with_session", lambda cfg, page, run: run(None))
+    body = tmp_path / "body.txt"
+    body.write_text("...")
+
+    args = ("cases", "create", "--subject", "s", "--description-file", str(body))
+    assert cli(*args, "--submit") == 2
+    assert filed == []
+    assert "'SP Endpoint' is required" in capsys.readouterr().err
+
+    # the dry run names the same problems and still exits cleanly
+    assert cli(*args) == 0
+    assert "'SP Endpoint' is required" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    [
+        ("--field", "no-equals-sign", "LABEL=VALUE"),
+        ("--field-file", "Error Message=/nonexistent/error.txt", "Error Message"),
+    ],
+)
+def test_malformed_form_fields_are_usage_errors(
+    cli: Callable[..., int],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    value: str,
+    message: str,
+) -> None:
+    body = tmp_path / "body.txt"
+    body.write_text("...")
+    args = ("cases", "create", "--subject", "s", "--description-file", str(body))
+    assert cli(*args, flag, value) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_a_form_field_given_twice_is_a_usage_error(
+    cli: Callable[..., int], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = tmp_path / "body.txt"
+    body.write_text("...")
+    args = ("cases", "create", "--subject", "s", "--description-file", str(body))
+    assert cli(*args, "--field", "SP Endpoint=/a", "--field", "sp endpoint=/b") == 2
+    assert "given twice" in capsys.readouterr().err

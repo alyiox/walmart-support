@@ -51,6 +51,7 @@ from .create import (
     CONTACT_PAGE,
     CaseDraft,
     Category,
+    FormError,
     Identity,
     Submission,
     fetch_category_tree,
@@ -323,7 +324,9 @@ def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
 
     def run(session: AuraSession) -> list[tuple[Category, list[Category]]]:
         identity = Identity.fetch(session)
-        return fetch_category_tree(session, ad_unit=ad_unit, partner_channel=identity.user_type)
+        return fetch_category_tree(
+            session, ad_unit=ad_unit, partner_channel=identity.user_type, portal=cfg.portal
+        )
 
     tree = with_session(cfg, CONTACT_PAGE, run)
 
@@ -341,6 +344,25 @@ def _cmd_categories_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _form_fields(values: Sequence[str], files: Sequence[str]) -> dict[str, str]:
+    """Read ``LABEL=VALUE`` and ``LABEL=PATH`` pairs into one label-keyed map."""
+    fields: dict[str, str] = {}
+    for pair, from_file in [(v, False) for v in values] + [(f, True) for f in files]:
+        label, sep, value = pair.partition("=")
+        flag = "--field-file" if from_file else "--field"
+        if not sep or not label.strip():
+            raise FormError(f"{flag} takes LABEL={'PATH' if from_file else 'VALUE'}, got {pair!r}")
+        if label.strip().casefold() in {k.casefold() for k in fields}:
+            raise FormError(f"form field {label.strip()!r} is given twice")
+        if from_file:
+            try:
+                value = Path(value).read_text()
+            except OSError as exc:
+                raise FormError(f"{flag} {label.strip()!r}: {exc}") from exc
+        fields[label.strip()] = value
+    return fields
+
+
 def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
     portal = cfg.portal
     draft = CaseDraft(
@@ -350,10 +372,18 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
         category=args.category,
         issue=args.issue,
         ad_unit=portal.resolve_ad_unit(args.platform),
+        fields=_form_fields(args.field or [], args.field_file or []),
     )
 
     def run(session: AuraSession) -> tuple[Submission, dict[str, Any] | None]:
         submission = prepare(session, draft, portal=portal)
+        # The portal accepts a case its own form would have refused, so this is
+        # the only place those checks stop a filing.
+        if args.submit and submission.problems:
+            raise FormError(
+                "refusing to file; the portal's form would reject this case:\n  "
+                + "\n  ".join(submission.problems)
+            )
         return submission, submit(session, submission) if args.submit else None
 
     submission, filed = with_session(cfg, CONTACT_PAGE, run)
@@ -381,6 +411,7 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
                         "portal": portal.key,
                         "action": submission.action,
                         "dry_run": submission.fields,
+                        "problems": list(submission.problems),
                     },
                     indent=2,
                 )
@@ -390,6 +421,12 @@ def _cmd_cases_create(cfg: Config, args: argparse.Namespace) -> int:
             print(f"\nwould file at {portal.label} through {submission.action}.")
         # flush first so the notice lands after the payload, not interleaved
         sys.stdout.flush()
+        if submission.problems:
+            print("\nthe portal's form would reject this case:", file=sys.stderr)
+            for problem in submission.problems:
+                print(f"  {problem}", file=sys.stderr)
+            print("\nnothing was filed. Fix the above, then re-run with --submit.", file=sys.stderr)
+            return 0
         print("\nnothing was filed. Re-run with --submit to file this case.", file=sys.stderr)
         return 0
 
@@ -425,7 +462,8 @@ _EXAMPLES = """examples:
   walmart-support --portal walmart cases list --query "adGroups/list" --since 30d --deep
   walmart-support --portal walmart cases reply 10000001 --message-file answer.txt
   walmart-support --portal walmart cases attach 10000001 ./har.json
-  walmart-support --portal walmart cases create --subject ... --description-file body.txt
+  walmart-support --portal walmart cases create --subject ... --description-file body.txt \
+      --field "SP Endpoint=/api/v1/stats" --field-file "Error Message=error.txt"
   walmart-support --portal walmart categories list --platform sponsored-search
 
   walmart-support --portal samsclub cases list
@@ -537,8 +575,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument(
         "--issue",
-        default="Endpoint-specific problem",
-        help="level-2 issue, per 'categories list' (default: Endpoint-specific problem)",
+        default="Endpoint-Specific",
+        help="level-2 issue, per 'categories list' (default: Endpoint-Specific)",
+    )
+    create.add_argument(
+        "--field",
+        action="append",
+        metavar="LABEL=VALUE",
+        help="fill one of the issue's form fields, by the label the portal shows; Walmart only",
+    )
+    create.add_argument(
+        "--field-file",
+        action="append",
+        metavar="LABEL=PATH",
+        help="fill a form field from a file, for prose such as a request/response; Walmart only",
     )
     create.add_argument(
         "--platform",
@@ -590,7 +640,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         with contextlib.suppress(OSError):
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
-    except (PortalError, TooManyCandidates) as exc:
+    except (PortalError, TooManyCandidates, FormError) as exc:
         print(f"{exc}", file=sys.stderr)
         return 2
     except AuraError as exc:

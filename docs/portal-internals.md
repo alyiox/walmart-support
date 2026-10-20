@@ -55,30 +55,107 @@ the full chain. The intermediate is bundled in `src/walmart_support/ca-certifica
 certificate, and trusted alongside certifi's roots; replace it there if Sam's moves to another
 issuer.
 
+## Walmart's October 2026 rebuild
+
+Walmart moved its portal onto a new Salesforce org in mid-October 2026. The hostname, login, Aura
+transport and the `AC_*` controller names stayed; the case form and the case records did not.
+
+- **Cases were migrated.** The list returns only cases created since 2025-09-04; older ones are
+  "historical" and come back through a migration request (`AC_CaseMigrationRequestForm`, backed
+  by `GCRM_MigrationRequestController.submitMigrationRequestFlat(requestType, fromDateStr,
+  toDateStr, caseIds)`). The CLI does not file those requests.
+- **A migrated case has two numbers.** `getCaseData` answers `displayCaseNumber` — the old number,
+  the one support's emails quote and the list shows — and `detail.CaseNumber`, the new org's own
+  (`00035294` against `16639778`). The detail lookup accepts the old one.
+- **A migrated case's category moved.** `Issue_Category__c` and `Sub_Category_1__c` hold the
+  placeholders `GCRM Issue Category` / `GCRM Sub Category`; the real values are on
+  `GCRM_Issue_category__c` / `GCRM_Sub_category_1__c`.
+- `c:AC_CaseDetail` no longer resolves as a component, but `AC_CaseDetailController`'s
+  `getCaseData`, `saveCaseComment` and `closeCaseSt` still do, with the same parameters. A
+  malformed id draws `Invalid id`, not a dropped action, which is how that was checked without
+  writing anything.
+- A new status, `Ready for Review`, appeared on the first post-rebuild case.
+
 ## Filing a case
 
 **The two orgs do not file through the same method, and it is not interchangeable.**
 
 | | Walmart Connect | Sam's Club |
 | --- | --- | --- |
+| Category tree | `getCategoryTree` | `getCaseCategoriesNew` |
+| Issue form | `getFormForConfig` | none |
 | API-category cases | `openCase` | `saveApiCase` |
 | Everything else | `openCase` | `openCase` |
-| `openCase` parameters | 31 | 19 |
-| Escapes subject/body | no | **twice, in `openCase` only** |
+| `openCase` parameters | 19 | 19, a different 19 |
+| Escapes subject/body | not re-measured since the rebuild | **twice, in `openCase` only** |
+
+### Walmart's form
+
+`getCategoryTree(platform, userType, auth)` returns nested nodes —
+`{id, label, configId, caseRecordType, authentication, children}`. `auth` is the literal
+`Authenticated`; `platform` is the ad unit, except that the category selector renames three before
+asking: `Display` → `Onsite Display`, `ShopBuilder` → `BrandShops`, `Store Ads` → `In-Store Ads`.
+On an `API Partner` account, Sponsored Products, Onsite Display, BrandShops and Platform Services
+return a tree; Sponsored Brands, Sponsored Videos, Offsite Display and In-Store Ads return `[]`.
+Sponsored Products' own `Campaign Set-Up` holds the Brands and Videos enablement issue.
+
+A node has one name, and the form writes it twice: `problemDomain` is the level-1 label and
+`subDomain` the level-2 label (`API` / `Endpoint-Specific`). There is no separate backend name.
+
+The issue's `configId` goes to `getFormForConfig(configId)`, which answers `{config, fields}`.
+`config.Form_Template__c` is sent back as `formTemplateId`; `config.Disable_Submission__c` closes
+the issue to new cases. Each field carries `label`, `caseField` (the Case field it lands in),
+`fieldType`, `required` (`Always` or `Never`), `options`, `customUi`, `fieldGroup`,
+`dependsOnFieldId`/`dependsOnValue` and a `validationPattern`. The form deduplicates fields on
+label, `caseField` and type.
+
+The form sends **every** field back in `additionalFieldsString`, as a JSON list of
+`{title, required, value, fieldName, fieldType, options, helpText, validations,
+validationErrorMessage, skip}` — `fieldName` is the `caseField`, `fieldType` is translated back to
+the older names (`Picklist` → `SinglePicklist`, `MultiPicklist` → `MultiSelectPicklist`,
+`Radio` → `RadioGroup`, `File` → `File Upload`), and a field whose dependency is unmet goes out
+with an empty value. `skip` is true for a `customUi` field, the description, and the advertiser
+group; false for a read-only one; otherwise true when the field binds no Case field and is not a
+file.
+
+The advertiser group (`fieldGroup` `Advertiser`) is drawn as a picker fed by
+`getAdvertisersForAccount(accountId)`. An `API Partner` account has no `Advertiser__c` records, so
+the picker falls back to two typed inputs, `Walmart Advertiser Name` and
+`Walmart Ad Center Advertiser ID`; the id is also sent as `openCase`'s own `advertiserId`. Two
+forms declare the id outside the group, as a plain text field.
+
+**Required fields are enforced only in the browser.** An `openCase` with every required form field
+blank reached the insert and failed there on an oversized subject alone, so the portal would have
+filed it. The CLI makes the form's checks itself.
+
+The API issues on Sponsored Products and Onsite Display, and what each form requires besides the
+description (`*` required):
+
+| Issue | Fields |
+| --- | --- |
+| Endpoint-Specific | advertiser id, endpoint picklist\*, `Request / Response Details`\*, `Error Message`\*, screenshot |
+| Throttling | advertiser id\*, `Endpoint`\*, `Rate Limit Issue Details`\*, `Issue Timestamp`\*, screenshot |
+| Production API Access, Sandbox API Access, Sandbox/Dummy Data Request | advertiser id, screenshot |
+| Other | advertiser id\*, screenshot |
+
+The endpoint picklist is labelled `SP Endpoint` on Sponsored Products and
+`Display Onsite Endpoint` on Onsite Display, and offers a fixed list of paths (18 and 27); a path
+not on the list cannot be chosen.
+
+### Sam's Club
 
 Sam's `AC_OpenCase.doInit` sets an `isApiCase` flag when the selected category's parent label is
 `API`, and `createCase` branches on it to `saveApiCase(NewAdvertiserWrapper advWrapper)`. Walmart's
 build of the same component has no such branch and declares no `saveApiCase` at all.
 
 The full parameter lists live in `portals.py`, in the order and spelling each org declares them.
-The differences: Sam's declares no `selectedAccountId`, `additionalFieldsString`, `product`, `geo`
-or `UserType`; it does declare `campaignName` and `supplierChannel`, which Walmart does not; and it
+Only Walmart declares `selectedAccountId`, `additionalFieldsString`, `geo`, `UserType`, `adUnit`,
+`documentId`, `advertiserId` and `formTemplateId`; only Sam's declares the four `backend*`
+parameters, `currentExperience`, `IsFeatureRequest`, `campaignName` and `supplierChannel`; and Sam's
 spells the article parameter `articleNotHelped` against Walmart's `ArticleNotHelped`.
 
-Aura **drops undeclared parameters in silence**. Sending Walmart's 31 parameters to Sam's
-19-parameter method therefore looked like it worked while discarding 15 of them, including
-`additionalFieldsString` — the only parameter carrying the advertiser ids. Nothing in the response
-says so.
+Aura **drops undeclared parameters in silence**, so a value sent under a name the org does not
+declare vanishes, and nothing in the response says so.
 
 The `saveApiCase` wrapper takes, verbatim from the form's own controller: `companyName`,
 `associatedBrands`, `billingContactJobTitle`, `billingContact`, `billingCompany`, `vendorName`,
@@ -97,8 +174,8 @@ account is on Sam's Club, and the picker offers `Self Serve` or `API`.
 
 A case filed through Sam's `openCase` is stored with its subject and body escaped twice:
 `&amp;quot;App&amp;quot;` where the text said `"App"`, `&amp;lt;redacted&amp;gt;` where it said
-`<redacted>`. The transform is entirely portal-side. Walmart's build of the same method stores the
-identical bytes raw, and so does Sam's `saveApiCase`.
+`<redacted>`. The transform is entirely portal-side. Sam's `saveApiCase` stores the identical bytes
+raw, and so did Walmart's `openCase` before the rebuild.
 
 Proven without filing anything. `Case.Subject` caps at 255, so an oversized subject fails the
 insert and Salesforce echoes the value it was about to write, after any server-side transform.
@@ -108,7 +185,7 @@ Aura escapes its own error message once, so the depth of the echo gives the dept
 | --- | --- | --- |
 | Sam's `openCase` | `&amp;amp;quot;App&amp;amp;quot;` | 2 |
 | Sam's `saveApiCase` | `&amp;quot;App&amp;quot;` | 1, i.e. raw |
-| Walmart `openCase` | `&amp;quot;App&amp;quot;` | 1, i.e. raw |
+| Walmart `openCase`, before the rebuild | `&amp;quot;App&amp;quot;` | 1, i.e. raw |
 
 It cost 4736 characters of body 6380 stored, against a 32000 cap on `Description`, and it degrades
 what the portal's own agents read. Case reads undo it where it was applied — see
@@ -121,29 +198,15 @@ any length or truncation cap.
 
 ### Traps in `openCase`
 
-- `additionalFieldsString` is a JSON **list** of `{title, value}` objects, not an object. Apex
-  deserializes it into a `List` — an object gives "Expected '[' at the beginning of List/Set" —
-  and rejects any other key by name.
-- `partnershipType` and `partnershipId` must be **empty**. `Partnership__c` is a lookup to a
-  Partnership record for supplier and seller channels, so an account id there fails the insert
-  with `FIELD_INTEGRITY_EXCEPTION`.
-- Category routing comes from the resolved level-1/level-2 pair. A filed case reports
-  `API-AdCases` / `Endpoint-specific problem` back.
+- `additionalFieldsString` is a JSON **list**, not an object. Apex deserializes it into a `List` —
+  an object gives "Expected '[' at the beginning of List/Set".
 
-> **Known defect, unconfirmed fix.** The portal resolves additional fields loosely against the
-> `title` sent. On the first CLI-filed case, `Advertiser Account Name` and `Advertisers Affected`
-> collided on their shared prefix, and the account name was stored under the advertisers field,
-> dropping the ids. The colliding field is no longer sent, which should fix it, but that is
-> unconfirmed until the next Walmart filing — and the wrapper evidently carries an identifier
-> beyond `title`/`value`, since its deserializer also accepts `fieldName`.
->
-> Either way, put anything that matters in the description body. It is stored verbatim, whereas
-> these fields are not reliably addressable.
-
-The Walmart `openCase` path is verified end to end: filed, replied to, closed. On Sam's Club,
-`openCase` is verified the same way, but **`saveApiCase` has never completed an insert from this
-client** — every probe against it was rejected on purpose. The first real `--submit` on a Sam's
-API case is still the first end-to-end proof.
+**Since the rebuild, Walmart's `openCase` has reached the insert but never completed one from this
+client**: the 19 parameters bind, and the probe that showed it was rejected on purpose. Whether each
+form field lands in its `caseField`, and what a new case's number looks like, wait on the first
+real `--submit`; until then, put anything that matters in the description body as well. On Sam's
+Club, `openCase` is verified end to end, but **`saveApiCase` has never completed an insert from
+this client** either — every probe against it was rejected on purpose.
 
 ## Attachments
 

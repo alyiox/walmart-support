@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from walmart_support.aura import SessionExpired
-from walmart_support.auth import build_client, check_auth, login, read_auth_state
+from walmart_support.auth import build_client, check_auth, login, read_auth_state, tls_context
 from walmart_support.config import Config
 from walmart_support.portals import WALMART
 
@@ -39,6 +39,20 @@ def test_cached_cookies_are_sent() -> None:
         assert client.cookies.get("sid") == "from-cache"
     finally:
         client.close()
+
+
+def test_tls_context_trusts_samsclub_intermediate() -> None:
+    # Sam's Club omits this intermediate from its handshake; without it in the
+    # trust store, every request to that portal fails verification.
+    names = {
+        value
+        for cert in tls_context().get_ca_certs()
+        for rdn in cert["subject"]
+        for key, value in rdn
+        if key == "commonName"
+    }
+    assert "GlobalSign GCC R46 OV TLS CA 2025" in names
+    assert "GlobalSign Root R46" in names
 
 
 def test_check_auth_uses_bootstrap_page(member_page: str) -> None:

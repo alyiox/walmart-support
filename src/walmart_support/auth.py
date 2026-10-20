@@ -15,11 +15,14 @@ import html as html_module
 import json
 import os
 import re
+import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from urllib.parse import urlparse
 
+import certifi
 import httpx
 
 from .aura import AuraSession, SessionExpired
@@ -107,9 +110,25 @@ def clear_session(path: Path) -> bool:
         return False
 
 
+def tls_context() -> ssl.SSLContext:
+    """Trust certifi's roots plus the intermediates a portal leaves out.
+
+    Sam's Club serves its leaf certificate without the intermediate that links
+    it to the root. Browsers fetch the missing issuer themselves; OpenSSL does
+    not, so without the bundled copy every request fails verification. Each
+    bundled certificate is one ``.crt`` file in ``ca-certificates/``.
+    """
+    context = ssl.create_default_context(cafile=certifi.where())
+    for cert in resources.files(__package__).joinpath("ca-certificates").iterdir():
+        if cert.name.endswith(".crt"):
+            context.load_verify_locations(cadata=cert.read_text())
+    return context
+
+
 def build_client(cfg: Config, cookies: dict[str, str] | None = None) -> httpx.Client:
     return httpx.Client(
         base_url=cfg.base_url,
+        verify=tls_context(),
         timeout=cfg.timeout,
         follow_redirects=True,
         headers={"User-Agent": _USER_AGENT},

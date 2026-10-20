@@ -46,6 +46,15 @@ aura://ComponentController/ACTION$getComponentDef   name=markup://c:AC_OpenCase
 It returns the component's declared server actions with their parameter lists, plus the controller
 JavaScript, which is what the form itself runs.
 
+### TLS chain
+
+`advertisinghelp.samsclub.com` sends its leaf certificate without the intermediate,
+`GlobalSign GCC R46 OV TLS CA 2025`. Browsers fetch the missing issuer themselves; OpenSSL does
+not, so curl and httpx fail with `unable to get local issuer certificate`. Walmart's portal sends
+the full chain. The intermediate is bundled in `src/walmart_support/ca-certificates/`, one `.crt` per
+certificate, and trusted alongside certifi's roots; replace it there if Sam's moves to another
+issuer.
+
 ## Filing a case
 
 **The two orgs do not file through the same method, and it is not interchangeable.**

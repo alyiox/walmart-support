@@ -5,184 +5,103 @@ description: Read, answer, and file advertising support cases on the Walmart Con
 
 # Advertising Help support cases
 
-`walmart-support` drives the Advertising Help portals — Salesforce Experience Cloud sites with no
-public API — from the shell. `walmart-support --help` and `walmart-support cases <command> --help`
-carry the full flag list; this file covers only what the help text cannot tell you.
+`walmart-support` drives the Walmart Connect and Sam's Club Advertising Help portals from the
+shell. `--help` on any command lists its flags; this file holds what the help text does not.
 
-Walmart Connect and Sam's Club are two Salesforce orgs running the same app, so every command here
-works against either. What genuinely differs per portal lives in a reference file — read the one for
-the portal you are working on, because **the status vocabularies overlap only on `Closed`** and only
-Walmart can close a case:
+Read the reference for the portal you act on before filing, closing, or filtering by status — the
+portals share only the `Closed` status, and filing and closing differ:
 
-- `references/walmart.md` — status vocabulary, filing playbook, `--platform` selection
-- `references/samsclub.md` — status vocabulary, category tree, which action files a case
-- `references/verifying-fix-claims.md` — proving a claimed Ads API fix actually shipped
+- `references/walmart.md` — statuses, filing playbook, form fields, `--platform`
+- `references/samsclub.md` — statuses, categories, filing actions, closing
+- `references/verifying-fix-claims.md` — proving a claimed Ads API fix shipped
 
-## Before anything
+## Invocation
 
-Run `walmart-support --version`. If the command is missing, `uvx walmart-support ...` runs every
-command below without installing anything.
-
-Credentials live in one config file per portal, and there is no environment fallback, so a
-missing-config failure is fixed by editing that file rather than by exporting anything.
-
-Every command logs in on its own and caches the session per portal, so there is nothing to run
-first. When a command exits 1 with `portal error:`, `auth check` tells you whether the credentials
-or the portal is at fault: a refused login is reported with the portal's own wording, under `error`
-in `--json`. It is a diagnostic, not a prerequisite, and retrying it in a loop will not fix a
-rejected login.
-
-`authenticated False` from that check is usually a **stale cached session, not bad credentials** —
-`walmart-support --portal <portal> auth logout` and re-running the original command clears it.
-Rule this out before reporting the portal as down.
-
-## `--portal` and `--json` go before the subcommand
-
-```bash
-walmart-support --json --portal walmart cases list --since 30d   # correct
-walmart-support --portal walmart cases list --json               # error: unrecognized arguments
-```
-
-Each portal caches its own session, keyed by host, so switching between them costs no re-login.
-**Say which portal you acted on** when reporting back — the write commands name it in their own
-output, and `--json` carries a `portal` field.
-
-## Keep case text out of the conversation
-
-An unfiltered `cases list` can run to hundreds of rows, and a case body is long. Filter in the
-shell before the output reaches you:
+- Check `walmart-support --version` first. If missing, prefix every command with `uvx`.
+- `--portal` and `--json` are global: they go **before** the subcommand.
+  `walmart-support --json --portal walmart cases list`, never `... cases list --json`.
+- Name the portal you acted on in every report back.
+- Prose goes through a file: `--description-file`, `--message-file`, `--field-file`. Never inline
+  multi-line text on the command line.
+- Filter output in the shell before it reaches the conversation:
 
 ```bash
 walmart-support --json --portal walmart cases list --since 30d | jq -r '.[] | select(.status | test("Need")) | .case_number'
 ```
 
-## Reading a thread
+## Authentication
 
-Support's acknowledgement quotes the whole case body back, and later replies quote the ones before
-them, so a raw thread is mostly repetition of what you already sent. `--from-support` drops your own
-messages:
+- Commands log in on their own and cache the session per portal. Nothing needs to run first.
+- Credentials live only in the config file. A missing-config error is fixed there, not with
+  environment variables.
+- On `portal error:` (exit 1), run `auth check` once to tell credentials from portal.
+- `authenticated False` usually means a stale cache: run `auth logout`, then rerun the original
+  command. Rule this out before reporting the portal down. Never loop `auth check`.
 
-```bash
-walmart-support --portal walmart cases replies 10000001 --from-support
-```
+## Reading
 
-**Read the whole thread; never narrow it to the newest message.** Automated queue notices stack on
-top of real replies — one landed five minutes after a deployed-fix announcement and buried it for a
-day. `--latest N` is for re-reading a message you already know about, never for finding out what
-support said. Separate the human replies from the automated ones as you read.
-
-`cases get` prints the case and a reply *count*, not the conversation — use `cases replies` for
-that. Each message is attributed `us` or the portal's own name; under `--json` the other side is
-always `support`, never a retailer name.
-
-Reads are cheap and time out often, so retry them freely. After a failed **write** (`cases reply`,
-`cases attach`), re-read the thread before retrying — the write may have landed, and a blind retry
-double-posts.
-
-**A thread with no new reply for 3+ days is a stall, not a cue to act.** Report it as one, together
-with anything you have drafted and not sent. A follow-up reply is the move, and whether to send it
-is the user's call — re-running the failing API is not a substitute for it.
+- `cases get` shows the case and a reply *count*; `cases replies` shows the conversation.
+- Read the **whole** thread. Automated notices stack on top of real replies and bury them.
+  `--latest N` only re-reads a message already known; never use it to learn what support said.
+- `--from-support` drops our own messages. Separate human replies from automated ones.
+- Retry failed reads freely. After a failed **write**, re-read the thread before retrying: the
+  write may have landed.
+- No reply for 3+ days is a stall. Report it with any unsent draft; whether to follow up is the
+  user's call. Re-running the failing API is not a follow-up.
 
 ## Searching
 
-- `--deep` costs **one request per case**, so narrow with `--status`/`--since` first. Past 25
-  candidates it refuses (exit 2) rather than issuing them.
-- A plain `--query` searches text the portal has already abbreviated, so it can miss a term that
-  is in the real body. Reach for `--deep` when a search that should match does not.
-- The `--status` vocabulary is per-portal and overlaps only on `Closed`. Take it from the portal's
-  reference file rather than reusing a filter across portals.
-- `--limit` only shrinks the fetch when no filter is present, so pairing it with one saves nothing.
+- A plain `--query` searches the portal's abbreviated text and can miss terms. Use `--deep` when a
+  search that should match does not.
+- `--deep` costs one request per case. Narrow with `--status`/`--since` first; past 25 candidates
+  it exits 2.
+- Take `--status` values from the portal's reference. Never reuse a filter across portals.
+- `--limit` saves requests only without other filters.
 
-## Prose goes through a file, never the command line
+## Filing
 
-Write the case body or reply to a file and pass `--description-file`/`--message-file`. Do not
-inline multi-line prose, and do not try to escape it.
+1. Run `cases create` **without** `--submit`. It prints the payload and files nothing.
+2. Read the last line, `would file at <portal> through <action>.` (`portal`/`action` under
+   `--json`), and check both against what you meant.
+3. Resolve every item under `the portal's form would reject this case` (`problems` under `--json`).
+   `--submit` exits 2 until none remain. The portal does not enforce these itself: **never satisfy
+   them with placeholder values.**
+4. Show the payload to the user. On an explicit go-ahead, rerun the identical command with
+   `--submit`.
 
-## Filing a case
-
-Works on both portals. The full Walmart playbook — category and issue selection, `--platform`, what
-belongs in the description — is in `references/walmart.md`, and `assets/case-description.md` is the
-skeleton for the body.
-
-`cases create` prints its payload and files **nothing** until you re-run the identical command
-with `--submit`. Never put `--submit` on the first attempt, and show the payload to the user
-before you do.
-
-A Walmart issue has a form of its own, filled with `--field "LABEL=VALUE"` and, for prose such as
-a request/response or an error body, `--field-file "LABEL=PATH"`. The dry run lists every required
-field still empty — with the values a picklist accepts — under `the portal's form would reject
-this case`, and `--submit` exits 2 until that list is gone. **The portal does not check these
-itself**, so that refusal is the only gate; never work around it with placeholder values. A label
-the issue does not have exits 2 and names the ones it does. Sam's Club has no forms and refuses
-`--field`.
-
-The preview ends `would file at <portal> through <action>.`, and `--json` carries `portal` and
-`action`. Read both. The payload names the case but never its destination, and **the two portals
-file through different Apex methods**: Walmart always `openCase`, Sam's Club `saveApiCase` under
-its `API` category and `openCase` elsewhere. Only `saveApiCase` stores the text unescaped there, so
-if a Sam's preview says `through openCase` for what you meant as an API case, check `--category`.
-
-That matters for how you report a Sam's case back. `cases get` and `cases replies` render the text
-correctly, but **support's own agents see the stored version**, which for an `openCase` case is
-HTML-escaped twice. Never quote our clean rendering to them as proof of what they received.
-
-`--advertisers` on Sam's Club reaches **API cases only**. Under any other category there is no
-field for the ids, so the CLI warns and drops them — put them in the description body instead.
-See `references/samsclub.md`.
+The case body follows `assets/case-description.md`. Per-portal category, field and advertiser
+rules are in the references.
 
 ## Replying, attaching, closing
 
-Available on both portals. `cases reply` and `cases attach` act on a case that already exists, so
-they need no dry run. `cases attach` uploads in chunks and reports the case's attachment count
-afterwards — check that the number went up rather than assuming success.
-
-Keep a reply to a few lines: the ask, one or two concrete facts, done. No evidence tables and no
-restating the case body — support already has it, and the supporting detail belongs in your own
-records, not in the thread.
-
-**A reply body is capped at 4000 characters, counted after HTML rendering** — the portal escapes
-the text and turns every newline into `<br>`, so a blank line between paragraphs costs 8, not 2.
-`cases reply` measures the rendered length and refuses over the cap (exit 2) before contacting the
-portal. If one gets through, the portal answers `portal error: ... STRING_TOO_LONG ...` and
-**inserts nothing** — the one failed write that cannot have landed, so trim and resend without
-re-reading the thread. The figure was measured against Walmart; Sam's Club runs the same Apex class
-but has not been confirmed.
-
-`cases close` is **Walmart only**, and one-way there: the portal offers no reopen, so ask the user
-before closing. On Sam's Club it exits 2 — `closeCaseSt` resolves but leaves the status untouched,
-so the CLI refuses rather than report a close that did not happen. Closing there is a UI action that
-lands the case on `Canceled`; see `references/samsclub.md`.
-
-Even on Walmart, `cases close` now checks that the status actually moved and exits 1 if it did not,
-so treat a zero exit as the only evidence of a close.
+- `cases reply` and `cases attach` have no dry run; they act at once.
+- Keep a reply to a few lines: the ask and one or two facts. Never restate the case body or paste
+  evidence tables.
+- A reply is capped at **4000 characters after rendering** (measured on Walmart): text is HTML-escaped and each newline
+  becomes `<br>`, so a blank line costs 8. Over the cap the CLI exits 2 before sending. A
+  `STRING_TOO_LONG` portal error inserted nothing — trim and resend without re-reading.
+- After `cases attach`, confirm the reported attachment count went up.
+- `cases close` cannot be undone. Get the user's go-ahead first. Only exit 0 proves a close. On Sam's Club,
+  follow `references/samsclub.md`.
 
 ## Before any outbound write
 
-Binding on `cases create --submit`, `cases reply` and `cases attach`. Each needs an explicit
-go-ahead from the user, and a sent message cannot be recalled. Drafts get assembled from internal
-notes, so strip them deliberately: re-read the draft against these three lists before it goes.
+Applies to `cases create --submit`, `cases reply` and `cases attach`. Each needs the user's
+explicit go-ahead; nothing sent can be recalled. Check the draft and every attachment against:
 
-**Stays** — the retailer-side identifiers support cannot trace without: advertiser, campaign and ad
-group ids, `wm_qos.correlation_id`, `wm_consumer.id`, tenant, timestamps, and the raw request and
-response bodies.
-
-**Redacted** — `wm_sec.auth_signature` and `Authorization: Bearer` → `<redacted>`.
-
-**Goes** — anything of your own side the case does not need: internal ticket keys and scratch
-paths, internal table, pipeline and service names, colleagues and chat references, which customer
-is escalating or how many are affected, your roadmap and what the defect blocks.
-
-Attachments take the same pass. A HAR carries internal hosts and other advertisers' traffic.
-
-Check the portal too. Posting a Walmart repro onto a Sam's Club case sends one retailer's
-identifiers into another's support queue.
+- **Keep** — advertiser, campaign and ad group ids, `wm_qos.correlation_id`, `wm_consumer.id`,
+  tenant, timestamps, raw request and response bodies.
+- **Redact** — `wm_sec.auth_signature` and `Authorization: Bearer` → `<redacted>`.
+- **Remove** — internal ticket keys, scratch paths, internal table/pipeline/service names,
+  colleagues, chat references, which customer escalated, how many are affected, roadmap, what the
+  defect blocks. A HAR carries internal hosts and other advertisers' traffic.
+- **Portal** — never post one retailer's identifiers onto the other retailer's case.
 
 ## Exit codes
 
-- `0` — success
-- `1` — portal or network failure (expired session, timeout, portal error), or a close the portal
-  accepted without moving the status. Report it; do not retry blindly.
-- `2` — usage, missing config, an unknown portal, a platform the portal does not offer, an empty or
-  over-length reply, a missing attachment file, closing on a portal that does not support it, the
-  deep-search cap, a form field the issue does not have, or `--submit` while the form still has
-  problems. Fix the command, not the connection.
+- `0` — success.
+- `1` — portal or network failure, or a close that left the status unmoved. Report it; do not
+  retry blindly.
+- `2` — refused before anything was written: usage, config, unknown portal or
+  platform, empty or over-length reply, missing file, unsupported close, deep-search cap, unknown
+  form field, or `--submit` with form problems. Fix the command, not the connection.

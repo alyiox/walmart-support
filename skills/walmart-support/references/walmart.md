@@ -63,6 +63,10 @@ shows Sponsored Products as its platform.
   behaviour. Use `assets/case-description.md`.
 - Keep the request and response in the description **even when a form field repeats them**: no
   form field has yet been confirmed to land on a filed case.
+- The portal silently drops everything between a `<` and the next `>` (seen on a reply,
+  2026-09-30: a whole paragraph and the cURL headers after `<redacted>` vanished), while the CLI
+  still exits 0. Write `[redacted]` and `is above 0`, never `<redacted>` or `> 0`, and diff the
+  read-back after sending.
 
 ## Closing
 

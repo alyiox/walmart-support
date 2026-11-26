@@ -91,7 +91,9 @@ explicit go-ahead; nothing sent can be recalled. Check the draft and every attac
 
 - **Keep** — advertiser, campaign and ad group ids, `wm_qos.correlation_id`, `wm_consumer.id`,
   tenant, timestamps, raw request and response bodies.
-- **Redact** — `wm_sec.auth_signature` and `Authorization: Bearer` → `<redacted>`.
+- **Redact** — `wm_sec.auth_signature` and `Authorization: Bearer` → `[redacted]`. Never use
+  `<…>` as a marker, and keep `<` / `>` out of prose: both portals mangle them (each reference
+  says how). `grep '[<>]'` the draft before it goes.
 - **Remove** — internal ticket keys, scratch paths, internal table/pipeline/service names,
   colleagues, chat references, which customer escalated, how many are affected, roadmap, what the
   defect blocks. A HAR carries internal hosts and other advertisers' traffic.

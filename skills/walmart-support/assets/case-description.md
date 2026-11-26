@@ -11,7 +11,7 @@ Run the draft past `Before any outbound write` in `SKILL.md` before it goes.
 
 ```
 curl -X GET 'https://advertising.walmart.com/api/v1/...' \
-  -H 'WM_SEC.ACCESS_TOKEN: <redacted>' \
+  -H 'WM_SEC.ACCESS_TOKEN: [redacted]' \
   -H 'WM_CONSUMER.ID: 00000000-0000-0000-0000-000000000000' \
   -H 'WM_QOS.CORRELATION_ID: 00000000-0000-0000-0000-000000000000'
 ```
